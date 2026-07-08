@@ -294,7 +294,5 @@ function confirmImport(sessionId, options = {}) {
 
 module.exports = {
   confirmImport,
-  getSession,
-  parseWorkbook,
-  sessions
+  parseWorkbook
 };

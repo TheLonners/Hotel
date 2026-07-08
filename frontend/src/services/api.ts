@@ -54,7 +54,6 @@ export const api = {
     return request<Record<string, unknown>>("/api/airbnb-sync/import-names", { method: "POST", body: form });
   },
 
-  payments: (reservationId: number) => request<Payment[]>(`/api/reservations/${reservationId}/payments`),
   createPayment: (reservationId: number, body: Record<string, unknown>) =>
     request<{ payment: Payment; reservation: Reservation }>(`/api/reservations/${reservationId}/payments`, { method: "POST", body: JSON.stringify(body) }),
   deletePayment: (id: number) => request<{ ok: boolean }>(`/api/payments/${id}`, { method: "DELETE" }),
@@ -85,7 +84,6 @@ export const api = {
   importRoomsConfirm: (sessionId: string, force = false) =>
     request<Record<string, unknown>>("/api/import/rooms/confirm", { method: "POST", body: JSON.stringify({ sessionId, force }) }),
 
-  exportUrl: (path: string, params: Record<string, string> = {}) => `${API_BASE}${path}?${new URLSearchParams(params)}`,
   downloadFile: async (path: string, filename: string) => {
     const headers = new Headers();
     const password = localStorage.getItem("hotel_admin_password");

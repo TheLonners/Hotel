@@ -2,6 +2,9 @@ packages:
   - backend
   - frontend
 
+overrides:
+  postcss: 8.5.16
+
 allowBuilds:
   esbuild: true
   sharp: true

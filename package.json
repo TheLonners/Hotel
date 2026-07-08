@@ -9,6 +9,7 @@
     "start": "pnpm --filter hotel-reservas-backend start",
     "dev:backend": "pnpm --filter hotel-reservas-backend dev",
     "dev:frontend": "pnpm --filter hotel-reservas-frontend dev",
+    "typecheck": "pnpm --filter hotel-reservas-frontend typecheck",
     "seed": "pnpm --filter hotel-reservas-backend seed"
   },
   "engines": {

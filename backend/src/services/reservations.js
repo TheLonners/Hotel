@@ -740,7 +740,6 @@ module.exports = {
   getReservations,
   getRoomByCode,
   getRoomById,
-  mirrorRoomAirbnbFeed,
   recalculateReservationPayments,
   updatePayment,
   updateReservation,

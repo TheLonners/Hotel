@@ -530,9 +530,7 @@ async function syncDueAirbnbFeeds() {
 module.exports = {
   createAirbnbFeed,
   deleteAirbnbFeed,
-  getAirbnbFeed,
   listAirbnbFeeds,
-  parseIcsCalendar,
   syncAirbnbFeed,
   syncDueAirbnbFeeds,
   testRoomIcalLink,

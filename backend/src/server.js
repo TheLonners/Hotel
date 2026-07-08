@@ -103,9 +103,26 @@ const upload = multer({
   }
 });
 
+function workbookFileFilter(_req, file, cb) {
+  const extension = path.extname(file.originalname || "").toLowerCase();
+  const allowedExtensions = new Set([".csv", ".xls", ".xlsx"]);
+  const allowedTypes = new Set([
+    "application/csv",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/csv"
+  ]);
+  if (allowedExtensions.has(extension) || allowedTypes.has(file.mimetype)) return cb(null, true);
+
+  const error = new Error("Solo se aceptan archivos Excel o CSV.");
+  error.status = 400;
+  return cb(error);
+}
+
 const memoryUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 }
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: workbookFileFilter
 });
 
 function asyncRoute(handler) {
@@ -770,16 +787,16 @@ app.put("/api/alerts/:id/resolve", (req, res) => {
   res.json(db.prepare("SELECT * FROM alerts WHERE id = ?").get(Number(req.params.id)));
 });
 
-const frontendDistCandidates = [
-  path.resolve(process.cwd(), "frontend/dist"),
-  path.resolve(process.cwd(), "../frontend/dist")
+const frontendOutCandidates = [
+  path.resolve(process.cwd(), "frontend/out"),
+  path.resolve(process.cwd(), "../frontend/out")
 ];
-const frontendDist = frontendDistCandidates.find((candidate) => fs.existsSync(candidate));
-if (frontendDist) {
-  app.use(express.static(frontendDist));
+const frontendOut = frontendOutCandidates.find((candidate) => fs.existsSync(candidate));
+if (frontendOut) {
+  app.use(express.static(frontendOut));
   app.get("*", (req, res, next) => {
     if (req.path.startsWith("/api") || req.path.startsWith("/uploads")) return next();
-    res.sendFile(path.join(frontendDist, "index.html"));
+    res.sendFile(path.join(frontendOut, "index.html"));
   });
 }
 

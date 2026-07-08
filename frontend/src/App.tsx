@@ -21,6 +21,23 @@ import {
   Upload,
   X
 } from "lucide-react";
+import {
+  addDays,
+  calendarDays,
+  currentMonth,
+  diffDays,
+  effectiveEnd,
+  formatMoney,
+  formatPercent,
+  formatRoomPrice,
+  isAirbnbPlaceholderName,
+  parseDate,
+  paymentClass,
+  reservationParams,
+  roomLabel,
+  shiftMonth,
+  today
+} from "./lib/hotel-utils";
 import { api, type ImportPreview, type RoomImportPreview } from "./services/api";
 import type { AirbnbFeed, Attachment, BillingAccount, Block, CleaningReport, CleaningRoom, Dashboard, OperationRow, Reservation, Room, TodayOperations } from "./services/types";
 
@@ -41,9 +58,6 @@ type AirbnbImportPreview = {
     data: Record<string, unknown>;
   }[];
 };
-
-const today = new Date().toISOString().slice(0, 10);
-const currentMonth = today.slice(0, 7);
 
 const emptyReservation = {
   numero_interno: "",
@@ -77,95 +91,6 @@ const emptyReservation = {
   siigo_ok: false,
   queo_ok: false
 };
-
-function formatMoney(value: number | string | undefined) {
-  const numeric = Number(value || 0);
-  return new Intl.NumberFormat("es-CO", {
-    style: "currency",
-    currency: "COP",
-    maximumFractionDigits: 0
-  }).format(numeric);
-}
-
-function formatRoomPrice(room: Room) {
-  return room.estado === "inactiva" ? "Deshabilitada" : formatMoney(room.precio_base_noche);
-}
-
-function formatPercent(value: number | string | undefined) {
-  return `${Number(value || 0).toFixed(1)}%`;
-}
-
-function parseDate(date: string) {
-  const [year, month, day] = date.split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1, day));
-}
-
-function toISO(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function addDays(date: string, amount: number) {
-  const parsed = parseDate(date);
-  parsed.setUTCDate(parsed.getUTCDate() + amount);
-  return toISO(parsed);
-}
-
-function diffDays(start: string, end: string) {
-  return Math.round((parseDate(end).getTime() - parseDate(start).getTime()) / 86400000);
-}
-
-function effectiveEnd(start: string, end: string) {
-  return diffDays(start, end) <= 0 ? addDays(start, 1) : end;
-}
-
-function calendarRange(month: string) {
-  const [year, monthNumber] = month.split("-").map(Number);
-  const firstDay = toISO(new Date(Date.UTC(year, monthNumber - 1, 1)));
-  const rangeStart = month === currentMonth ? addDays(today, -1) : addDays(firstDay, -45);
-  return {
-    start: rangeStart,
-    end: addDays(firstDay, 120)
-  };
-}
-
-function calendarDays(month: string) {
-  const range = calendarRange(month);
-  const days: string[] = [];
-  for (let cursor = parseDate(range.start); cursor < parseDate(range.end); cursor.setUTCDate(cursor.getUTCDate() + 1)) {
-    days.push(toISO(cursor));
-  }
-  return days;
-}
-
-function shiftMonth(month: string, amount: number) {
-  const [year, monthNumber] = month.split("-").map(Number);
-  return toISO(new Date(Date.UTC(year, monthNumber - 1 + amount, 1))).slice(0, 7);
-}
-
-function paymentClass(status: string) {
-  if (status === "pagado_total") return "paid";
-  if (status === "sin_pago") return "unpaid";
-  if (status === "saldo_pendiente" || status === "abono_parcial") return "balance";
-  return "confirmed";
-}
-
-function roomLabel(reservation: Reservation) {
-  return reservation.rooms.map((room) => room.codigo_habitacion).join(" Y ");
-}
-
-function isAirbnbPlaceholderName(name: string) {
-  return /^Airbnb( |$)/i.test(String(name || "").trim());
-}
-
-function reservationParams(month: string, search: string, filters: Record<string, string>) {
-  const { start, end } = calendarRange(month);
-  const params: Record<string, string> = { start, end };
-  if (search.trim()) params.q = search.trim();
-  Object.entries(filters).forEach(([key, value]) => {
-    if (value) params[key] = value;
-  });
-  return params;
-}
 
 export default function App() {
   const [view, setView] = useState<View>("today");
@@ -824,7 +749,7 @@ function DetailPanel(props: { reservation: Reservation; onClose: () => void; onE
         {reservation.payments.map((item) => (
           <div className="list-row" key={item.id}>
             <div><strong>{formatMoney(item.monto)}</strong><small>{item.fecha_pago} · {item.banco_o_medio || item.metodo_pago}</small></div>
-            <button className="icon" title="Eliminar pago" onClick={async () => { await api.deletePayment(item.id); refreshReservation(); }}><X size={16} /></button>
+            <button className="icon" title="Eliminar pago" onClick={async () => { if (window.confirm("Eliminar este pago?")) { await api.deletePayment(item.id); refreshReservation(); } }}><X size={16} /></button>
           </div>
         ))}
         <div className="mini-form">
@@ -841,7 +766,7 @@ function DetailPanel(props: { reservation: Reservation; onClose: () => void; onE
         {reservation.attachments.map((item: Attachment) => (
           <div className="list-row" key={item.id}>
             <a href={item.ruta_archivo} target="_blank" rel="noreferrer"><Paperclip size={15} />{item.nombre_archivo}</a>
-            <button className="icon" title="Eliminar comprobante" onClick={async () => { await api.deleteAttachment(item.id); refreshReservation(); }}><X size={16} /></button>
+            <button className="icon" title="Eliminar comprobante" onClick={async () => { if (window.confirm("Eliminar este comprobante?")) { await api.deleteAttachment(item.id); refreshReservation(); } }}><X size={16} /></button>
           </div>
         ))}
         <div className="mini-form">
@@ -855,8 +780,8 @@ function DetailPanel(props: { reservation: Reservation; onClose: () => void; onE
         <button onClick={props.onEdit}>Editar</button>
         <button onClick={() => updateStatus("reprogramada")}>Reprogramar</button>
         <button onClick={() => updateStatus("finalizada")}>Finalizar</button>
-        <button className="danger" onClick={() => updateStatus("cancelada")}>Cancelar</button>
-        <button className="danger" onClick={async () => { if (confirm("Eliminar reserva?")) { await api.deleteReservation(reservation.id); props.onClose(); props.onChanged(); } }}>Eliminar</button>
+        <button className="danger" onClick={() => { if (window.confirm("Cancelar esta reserva?")) updateStatus("cancelada"); }}>Cancelar</button>
+        <button className="danger" onClick={async () => { if (window.confirm("Eliminar reserva?")) { await api.deleteReservation(reservation.id); props.onClose(); props.onChanged(); } }}>Eliminar</button>
       </div>
     </aside>
   );
@@ -1119,6 +1044,7 @@ function BlockDetailPanel(props: { block: Block; blocks: Block[]; onClose: () =>
   };
 
   const remove = async (group = false) => {
+    if (!window.confirm(group ? "Eliminar todo este grupo de bloqueos?" : "Eliminar este bloqueo?")) return;
     setError("");
     try {
       const targets = group && groupBlocks.length ? groupBlocks : [props.block];
@@ -2092,7 +2018,7 @@ function RoomsView(props: { rooms: Room[]; reservations: Reservation[]; onSaved:
                 {room.pendiente_revision ? <em>Pendiente de revisar</em> : null}
               </div>
               <button onClick={() => setEditing(room)}>Editar</button>
-              <button className="danger" onClick={async () => { await api.deleteRoom(room.id); props.onSaved(); }}>Desactivar</button>
+              <button className="danger" onClick={async () => { if (window.confirm("Desactivar esta habitacion?")) { await api.deleteRoom(room.id); props.onSaved(); } }}>Desactivar</button>
             </div>
           );
         })}
@@ -2104,8 +2030,6 @@ function RoomsView(props: { rooms: Room[]; reservations: Reservation[]; onSaved:
 
 function AirbnbSyncView(props: { rooms: Room[]; onChanged: () => void }) {
   const [feeds, setFeeds] = useState<AirbnbFeed[]>([]);
-  const [airbnbReservations, setAirbnbReservations] = useState<Reservation[]>([]);
-  const [guestNames, setGuestNames] = useState<Record<number, string>>({});
   const [form, setForm] = useState({
     habitacion_id: "",
     nombre: "",
@@ -2115,9 +2039,6 @@ function AirbnbSyncView(props: { rooms: Room[]; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [airbnbFile, setAirbnbFile] = useState<File | null>(null);
-  const [airbnbPreview, setAirbnbPreview] = useState<AirbnbImportPreview | null>(null);
-  const [listingMappings, setListingMappings] = useState<Record<string, string>>({});
 
   const loadFeeds = async () => {
     setError("");
@@ -2128,27 +2049,8 @@ function AirbnbSyncView(props: { rooms: Room[]; onChanged: () => void }) {
     }
   };
 
-  const loadAirbnbReservations = async () => {
-    try {
-      const reservations = await api.reservations({ origen_reserva: "airbnb" });
-      setAirbnbReservations(reservations);
-      setGuestNames((current) => {
-        const next = { ...current };
-        reservations.forEach((reservation) => {
-          if (next[reservation.id] === undefined) {
-            next[reservation.id] = isAirbnbPlaceholderName(reservation.nombre_completo_huesped) ? "" : reservation.nombre_completo_huesped;
-          }
-        });
-        return next;
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudieron cargar las reservas Airbnb.");
-    }
-  };
-
   useEffect(() => {
     loadFeeds();
-    loadAirbnbReservations();
   }, []);
 
   useEffect(() => {
@@ -2191,7 +2093,6 @@ function AirbnbSyncView(props: { rooms: Room[]; onChanged: () => void }) {
       const result = await api.syncAirbnbFeed(feed.id);
       setMessage(`Sincronizacion lista: ${result.created || 0} creadas, ${result.updated || 0} actualizadas, ${result.blocked || 0} bloqueos, ${result.cancelled || 0} canceladas, ${result.skipped || 0} omitidas.`);
       await loadFeeds();
-      await loadAirbnbReservations();
       props.onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo sincronizar Airbnb.");
@@ -2215,6 +2116,7 @@ function AirbnbSyncView(props: { rooms: Room[]; onChanged: () => void }) {
   };
 
   const deleteFeed = async (feed: AirbnbFeed) => {
+    if (!window.confirm("Eliminar esta sincronizacion Airbnb?")) return;
     setBusy(true);
     setError("");
     try {
@@ -2226,75 +2128,6 @@ function AirbnbSyncView(props: { rooms: Room[]; onChanged: () => void }) {
       setBusy(false);
     }
   };
-
-  const importNamesFile = async (file?: File) => {
-    if (!file) return;
-    setBusy(true);
-    setError("");
-    setMessage("");
-    try {
-      setAirbnbFile(file);
-      setListingMappings({});
-      setAirbnbPreview(await api.previewAirbnbImport(file) as AirbnbImportPreview);
-      setMessage("Preview Airbnb listo. Revisa las alertas y confirma el cargue.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo previsualizar el archivo Airbnb.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const confirmAirbnbImport = async () => {
-    if (!airbnbFile) return;
-    setBusy(true);
-    setError("");
-    setMessage("");
-    try {
-      const result = await api.importAirbnbNames(airbnbFile, listingMappings);
-      setMessage(`Archivo Airbnb procesado. Creadas: ${result.creadas || 0}. Actualizadas: ${result.actualizadas || 0}. Pagos: ${result.pagos || 0}. Omitidas: ${result.omitidas || 0}.`);
-      setAirbnbPreview(null);
-      setAirbnbFile(null);
-      await loadAirbnbReservations();
-      props.onChanged();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo importar el archivo Airbnb.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const saveGuestName = async (reservation: Reservation) => {
-    const name = (guestNames[reservation.id] || "").trim();
-    if (!name) {
-      setError("Escribe el nombre del huesped antes de guardar.");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    setMessage("");
-    try {
-      await api.updateReservation(reservation.id, {
-        nombre_completo_huesped: name,
-        airbnb_ok: true
-      });
-      setMessage(`Nombre actualizado para ${reservation.numero_remision || reservation.id}.`);
-      await loadAirbnbReservations();
-      props.onChanged();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo actualizar el nombre.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const unmappedListings = useMemo(() => {
-    if (!airbnbPreview) return [];
-    return Array.from(new Set(
-      airbnbPreview.rows
-        .map((row) => String(row.data.anuncio || "").trim())
-        .filter((listing) => listing && !airbnbPreview.rows.find((row) => String(row.data.anuncio || "").trim() === listing && String(row.data.habitacion || "").trim()))
-    ));
-  }, [airbnbPreview]);
 
   return (
     <section className="airbnb-page">
@@ -2362,49 +2195,6 @@ function AirbnbSyncView(props: { rooms: Room[]; onChanged: () => void }) {
           </div>
           <span className="form-note">Usa Importar para archivos y Reservas Airbnb para nombres.</span>
         </div>
-        {airbnbPreview && (
-          <section className="preview-card">
-            <div className="preview-header">
-              <div>
-                <h2>Preview Airbnb</h2>
-                <p>{airbnbPreview.nombre_archivo} · {airbnbPreview.filas} filas · {airbnbPreview.createCount} nuevas · {airbnbPreview.updateCount} para actualizar · {airbnbPreview.alertCount} alertas</p>
-              </div>
-              <button className="primary" disabled={busy || (airbnbPreview.canImportCount === 0 && !Object.values(listingMappings).some(Boolean))} onClick={confirmAirbnbImport}><Upload size={17} />Confirmar cargue Airbnb</button>
-            </div>
-            {unmappedListings.length > 0 && (
-              <div className="mapping-grid">
-                {unmappedListings.map((listing) => (
-                  <label key={listing}>{listing}
-                    <select value={listingMappings[listing] || ""} onChange={(event) => setListingMappings({ ...listingMappings, [listing]: event.target.value })}>
-                      <option value="">Selecciona habitacion</option>
-                      {props.rooms.map((room) => <option key={room.id} value={room.id}>{room.codigo_habitacion} - {room.nombre_habitacion}</option>)}
-                    </select>
-                  </label>
-                ))}
-              </div>
-            )}
-            <div className="preview-table">
-              <table>
-                <thead><tr><th>Fila</th><th>Accion</th><th>Codigo</th><th>Huesped</th><th>Anuncio</th><th>Ingreso</th><th>Salida</th><th>Habitacion</th><th>Alertas</th></tr></thead>
-                <tbody>
-                  {airbnbPreview.rows.map((row) => (
-                    <tr key={row.rowNumber}>
-                      <td>{row.rowNumber}</td>
-                      <td>{row.action}</td>
-                      <td>{String(row.data.code || "")}</td>
-                      <td>{String(row.data.nombre_huesped || "")}</td>
-                      <td>{String(row.data.anuncio || "")}</td>
-                      <td>{String(row.data.fecha_ingreso || "")}</td>
-                      <td>{String(row.data.fecha_salida || "")}</td>
-                      <td>{String(row.data.habitacion || "")}</td>
-                      <td>{row.alerts.length}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
         <p className="empty-copy">La lista y edicion de nombres queda en la pestaña Reservas Airbnb.</p>
       </section>
 
@@ -2848,205 +2638,6 @@ function ImportView(props: { rooms: Room[]; onImported: () => void }) {
           <button onClick={downloadGuide}><Download size={17} />Descargar guia</button>
         </div>
       </details>
-    </section>
-  );
-}
-
-function LegacyImportView(props: { onImported: () => void }) {
-  const [preview, setPreview] = useState<ImportPreview | null>(null);
-  const [roomPreview, setRoomPreview] = useState<RoomImportPreview | null>(null);
-  const [force, setForce] = useState(false);
-  const [roomForce, setRoomForce] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-
-  const upload = async (file?: File) => {
-    if (!file) return;
-    setBusy(true);
-    setError("");
-    setMessage("");
-    try {
-      setPreview(await api.importPreview(file));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo leer el archivo.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const uploadRooms = async (file?: File) => {
-    if (!file) return;
-    setBusy(true);
-    setError("");
-    setMessage("");
-    try {
-      setRoomPreview(await api.importRoomsPreview(file));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo leer el archivo de habitaciones.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const confirm = async () => {
-    if (!preview) return;
-    setBusy(true);
-    setError("");
-    try {
-      const result = await api.importConfirm(preview.sessionId, force);
-      setMessage(`Importacion completada. Reservas creadas: ${result.cantidad_reservas_creadas}. Alertas: ${result.cantidad_alertas}.`);
-      setPreview(null);
-      props.onImported();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo confirmar.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const confirmRooms = async () => {
-    if (!roomPreview) return;
-    setBusy(true);
-    setError("");
-    try {
-      const result = await api.importRoomsConfirm(roomPreview.sessionId, roomForce);
-      setMessage(`Habitaciones actualizadas. Creadas: ${result.habitaciones_creadas}. Actualizadas: ${result.habitaciones_actualizadas}. Alertas: ${result.cantidad_alertas}.`);
-      setRoomPreview(null);
-      props.onImported();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo confirmar el cargue de habitaciones.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const downloadGuide = async () => {
-    setError("");
-    try {
-      await api.downloadFile("/api/import/excel/template", "guia-importacion-reservas-hotel.xlsx");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo descargar la guia.");
-    }
-  };
-
-  return (
-    <section className="import-page">
-      <section className="work-panel">
-        <h2>Cargue masivo de habitaciones</h2>
-        <div className="bulk-actions">
-          <button onClick={() => api.downloadFile("/api/export/rooms.xlsx", "habitaciones-actuales-cargue-masivo.xlsx")}>
-            <Download size={17} />Descargar habitaciones actuales
-          </button>
-        </div>
-        <div className="upload-zone">
-          <FileSpreadsheet size={36} />
-          <input type="file" accept=".xlsx,.xls,.csv" onChange={(event) => uploadRooms(event.target.files?.[0])} />
-        </div>
-        <div className="template-download">
-          <div>
-            <strong>Actualiza sin duplicar habitaciones</strong>
-            <span>El campo Código Interno es la llave. Si existe, actualiza datos y precios; si no existe, crea la habitación.</span>
-          </div>
-        </div>
-        {roomPreview && (
-          <section className="preview-card">
-            <div className="preview-header">
-              <div>
-                <h2>Previsualizacion habitaciones</h2>
-                <p>{roomPreview.fileName} · hoja {roomPreview.sheetName} · {roomPreview.totalRows} filas · {roomPreview.createCount} nuevas · {roomPreview.updateCount} para actualizar</p>
-              </div>
-              <label className="check"><input type="checkbox" checked={roomForce} onChange={(event) => setRoomForce(event.target.checked)} />Forzar filas con alertas altas</label>
-            </div>
-            <div className="alert-summary">
-              {roomPreview.alerts.slice(0, 25).map((alert, index) => <div className={`alert-line ${alert.severidad}`} key={`${alert.tipo_alerta}-${index}`}>{alert.mensaje}</div>)}
-              {roomPreview.alerts.length === 0 && <div className="notice success">No se detectaron alertas en el archivo de habitaciones.</div>}
-            </div>
-            <div className="preview-table">
-              <table>
-                <thead><tr><th>Fila</th><th>Accion</th><th>Codigo</th><th>Nombre</th><th>Tipo</th><th>Acomodacion</th><th>Capacidad</th><th>Valor base</th><th>Estado</th><th>Alertas</th></tr></thead>
-                <tbody>
-                  {roomPreview.rows.map((row) => (
-                    <tr key={row.rowNumber}>
-                      <td>{row.rowNumber}</td>
-                      <td>{row.action}</td>
-                      <td>{String(row.data.codigo_habitacion || "")}</td>
-                      <td>{String(row.data.nombre_habitacion || "")}</td>
-                      <td>{String(row.data.tipo_habitacion || "")}</td>
-                      <td>{String(row.data.acomodacion || "")}</td>
-                      <td>{String(row.data.capacidad || "")}</td>
-                      <td>{row.data.estado === "inactiva" ? "Deshabilitada" : formatMoney(Number(row.data.precio_base_noche || 0))}</td>
-                      <td>{String(row.data.estado || "")}</td>
-                      <td>{row.alerts.length}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="modal-actions">
-              <button onClick={() => setRoomPreview(null)}>Cancelar</button>
-              <button className="primary" onClick={confirmRooms}><Upload size={17} />Confirmar habitaciones</button>
-            </div>
-          </section>
-        )}
-      </section>
-
-      <section className="work-panel">
-        <h2>Importar reservas Excel o CSV</h2>
-        <div className="upload-zone">
-          <FileSpreadsheet size={36} />
-          <input type="file" accept=".xlsx,.xls,.csv" onChange={(event) => upload(event.target.files?.[0])} />
-        </div>
-        <div className="template-download">
-          <div>
-            <strong>Excel guia para importar correctamente</strong>
-            <span>Descarga la plantilla con encabezados, ejemplo y notas para llenar habitaciones, fechas, pagos y controles.</span>
-          </div>
-          <button onClick={downloadGuide}><Download size={17} />Descargar guia</button>
-        </div>
-        {busy && <div className="notice">Procesando archivo...</div>}
-        {error && <div className="notice error">{error}</div>}
-        {message && <div className="notice success">{message}</div>}
-      </section>
-
-      {preview && (
-        <section className="work-panel">
-          <div className="preview-header">
-            <div>
-              <h2>Previsualizacion</h2>
-              <p>{preview.fileName} · hoja {preview.sheetName} · {preview.totalRows} filas · {preview.canImportCount} importables sin alertas altas</p>
-            </div>
-            <label className="check"><input type="checkbox" checked={force} onChange={(event) => setForce(event.target.checked)} />Forzar filas con alertas altas</label>
-          </div>
-          <div className="alert-summary">
-            {preview.alerts.slice(0, 30).map((alert, index) => <div className={`alert-line ${alert.severidad}`} key={`${alert.tipo_alerta}-${index}`}>{alert.mensaje}</div>)}
-            {preview.alerts.length > 30 && <small>{preview.alerts.length - 30} alertas adicionales.</small>}
-          </div>
-          <div className="preview-table">
-            <table>
-              <thead><tr><th>Fila</th><th>Nombre</th><th>Habitacion</th><th>Ingreso</th><th>Salida</th><th>Total</th><th>Abono</th><th>Alertas</th></tr></thead>
-              <tbody>
-                {preview.rows.map((row) => (
-                  <tr key={row.rowNumber}>
-                    <td>{row.rowNumber}</td>
-                    <td>{String(row.data.nombre_completo_huesped || "")}</td>
-                    <td>{String(row.data.codigo_habitacion_original || "")}</td>
-                    <td>{String(row.data.fecha_ingreso || "")}</td>
-                    <td>{String(row.data.fecha_salida || "")}</td>
-                    <td>{formatMoney(Number(row.data.total_pago || 0))}</td>
-                    <td>{formatMoney(Number(row.data.abono || 0))}</td>
-                    <td>{row.alerts.length}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="modal-actions">
-            <button onClick={() => setPreview(null)}>Cancelar</button>
-            <button className="primary" onClick={confirm}><Upload size={17} />Confirmar importacion</button>
-          </div>
-        </section>
-      )}
     </section>
   );
 }

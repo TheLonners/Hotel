@@ -6,7 +6,7 @@ Aplicacion web local para gestionar reservas hoteleras con calendario tipo Airbn
 
 ```text
 backend/   API Express, SQLite, importador, exportador y uploads
-frontend/  React + Vite + TypeScript
+frontend/  Next.js + React + TypeScript
 ```
 
 ## Requisitos
@@ -15,7 +15,7 @@ frontend/  React + Vite + TypeScript
 - pnpm o npm.
 - Un computador servidor encendido dentro de la red local.
 
-La aplicacion no usa servicios cloud obligatorios. La base de datos queda en `backend/data/hotel.sqlite` y los comprobantes en `backend/uploads`.
+La aplicacion no usa servicios cloud obligatorios. Por defecto la base de datos queda en `data/hotel.sqlite` y los comprobantes en `uploads`.
 
 ## Instalacion
 
@@ -78,7 +78,7 @@ Abre:
 
 ## Ejecutar para uso local en un solo puerto
 
-Construye el frontend y deja que Express lo sirva:
+Construye el frontend como sitio estatico de Next.js y deja que Express lo sirva desde `frontend/out`:
 
 ```bash
 pnpm build
@@ -97,6 +97,18 @@ ipconfig
 ```
 
 Busca la IPv4 de la red Wi-Fi o Ethernet.
+
+## Validar cambios tecnicos
+
+Antes de publicar cambios importantes ejecuta:
+
+```bash
+pnpm typecheck
+pnpm build
+pnpm start
+```
+
+`pnpm typecheck` valida TypeScript sin depender de archivos generados en `.next`. `pnpm build` genera el frontend estatico en `frontend/out`.
 
 ## Importar el Excel actual
 
@@ -156,7 +168,7 @@ La exportacion de reservas respeta busqueda y filtros activos.
 Los comprobantes se suben desde el panel lateral de una reserva. Se aceptan imagenes y PDF. Los archivos quedan localmente en:
 
 ```text
-backend/uploads
+uploads
 ```
 
 ## Red local y acceso remoto opcional

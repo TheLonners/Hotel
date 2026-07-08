@@ -218,7 +218,6 @@ function cleaningCsv(date = toISODate(new Date())) {
 }
 
 module.exports = {
-  CLEANING_STATES,
   cleaningCsv,
   getTodayOperations,
   listCleaning,

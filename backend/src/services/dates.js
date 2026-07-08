@@ -104,8 +104,6 @@ module.exports = {
   compareDates,
   diffNights,
   effectiveCheckOut,
-  excelSerialToISO,
   parseDateValue,
-  rangesOverlap,
   toISODate
 };

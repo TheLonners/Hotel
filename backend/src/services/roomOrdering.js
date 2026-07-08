@@ -43,6 +43,5 @@ function sortRooms(rooms) {
 }
 
 module.exports = {
-  compareRoomCodes,
   sortRooms
 };
