@@ -1,0 +1,17 @@
+{
+  "name": "hotel-reservas-local",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.7.0",
+  "scripts": {
+    "install:all": "pnpm install",
+    "build": "pnpm --filter hotel-reservas-frontend build",
+    "start": "pnpm --filter hotel-reservas-backend start",
+    "dev:backend": "pnpm --filter hotel-reservas-backend dev",
+    "dev:frontend": "pnpm --filter hotel-reservas-frontend dev",
+    "seed": "pnpm --filter hotel-reservas-backend seed"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
