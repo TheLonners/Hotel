@@ -92,19 +92,22 @@ function ensureCleaningForDate(date = toISODate(new Date())) {
   const ops = getTodayOperations(date);
   const urgentRoomIds = new Set(ops.urgent_turnovers.map((row) => row.habitacion_id));
   const checkoutRows = ops.checkouts_today;
+  const checkoutRoomIds = new Set(checkoutRows.map((row) => row.habitacion_id));
+  const secondDayRows = ops.second_day_cleaning.filter((row) => !checkoutRoomIds.has(row.habitacion_id));
+  const isCurrentDate = date === toISODate(new Date());
 
   const upsert = db.prepare(`
     INSERT INTO room_cleaning_status (habitacion_id, estado, fecha_estado, prioridad, notas, fecha_actualizacion)
     VALUES (@habitacion_id, @estado, @fecha_estado, @prioridad, @notas, datetime('now'))
     ON CONFLICT(habitacion_id) DO UPDATE SET
       estado = CASE
-        WHEN room_cleaning_status.estado = 'limpio' AND room_cleaning_status.fecha_estado = excluded.fecha_estado THEN room_cleaning_status.estado
+        WHEN room_cleaning_status.fecha_estado = excluded.fecha_estado THEN room_cleaning_status.estado
         ELSE excluded.estado
       END,
       fecha_estado = excluded.fecha_estado,
       prioridad = excluded.prioridad,
       notas = CASE
-        WHEN room_cleaning_status.estado = 'limpio' AND room_cleaning_status.fecha_estado = excluded.fecha_estado THEN room_cleaning_status.notas
+        WHEN room_cleaning_status.fecha_estado = excluded.fecha_estado THEN room_cleaning_status.notas
         ELSE excluded.notas
       END,
       fecha_actualizacion = datetime('now')
@@ -115,15 +118,20 @@ function ensureCleaningForDate(date = toISODate(new Date())) {
     SELECT @habitacion_id, @fecha, @estado, @prioridad, @notas
     WHERE NOT EXISTS (
       SELECT 1 FROM room_cleaning_history
-      WHERE habitacion_id = @habitacion_id AND fecha = @fecha AND estado = @estado AND prioridad = @prioridad
+      WHERE habitacion_id = @habitacion_id AND fecha = @fecha
     )
   `);
 
-  checkoutRows.forEach((row) => {
-    const priority = urgentRoomIds.has(row.habitacion_id) ? "urgente" : "salida";
+  [
+    ...checkoutRows.map((row) => ({ row, kind: "salida" })),
+    ...secondDayRows.map((row) => ({ row, kind: "segundo_dia" }))
+  ].forEach(({ row, kind }) => {
+    const priority = urgentRoomIds.has(row.habitacion_id) ? "urgente" : kind;
     const notes = priority === "urgente"
       ? "Salida y entrada el mismo dia. Prioridad alta."
-      : "Salida programada hoy.";
+      : kind === "segundo_dia"
+        ? "Aseo de segundo dia de estadia."
+        : "Salida programada hoy.";
     const payload = {
       habitacion_id: row.habitacion_id,
       estado: "por limpiar",
@@ -131,7 +139,7 @@ function ensureCleaningForDate(date = toISODate(new Date())) {
       prioridad: priority,
       notas: notes
     };
-    upsert.run(payload);
+    if (isCurrentDate) upsert.run(payload);
     insertHistory.run({
       habitacion_id: payload.habitacion_id,
       fecha: date,
@@ -147,6 +155,16 @@ function listCleaning(date = toISODate(new Date())) {
   const rooms = sortRooms(db.prepare("SELECT * FROM rooms").all());
   const statusRows = db.prepare("SELECT * FROM room_cleaning_status").all();
   const statusByRoom = new Map(statusRows.map((row) => [row.habitacion_id, row]));
+  const selectedDateRows = db.prepare(`
+    SELECT h.*
+    FROM room_cleaning_history h
+    WHERE h.fecha = ?
+    ORDER BY h.habitacion_id, h.fecha_creacion DESC, h.id DESC
+  `).all(date);
+  const selectedStatusByRoom = new Map();
+  selectedDateRows.forEach((row) => {
+    if (!selectedStatusByRoom.has(row.habitacion_id)) selectedStatusByRoom.set(row.habitacion_id, row);
+  });
   const history = db.prepare(`
     SELECT h.*, r.codigo_habitacion, r.nombre_habitacion
     FROM room_cleaning_history h
@@ -156,20 +174,21 @@ function listCleaning(date = toISODate(new Date())) {
   `).all(date);
   const ops = getTodayOperations(date);
   const urgentRoomIds = new Set(ops.urgent_turnovers.map((row) => row.habitacion_id));
+  const isCurrentDate = date === toISODate(new Date());
 
   return {
     date,
     rooms: rooms.map((room) => {
-      const status = statusByRoom.get(room.id);
+      const status = selectedStatusByRoom.get(room.id) || (isCurrentDate ? statusByRoom.get(room.id) : null);
       return {
         habitacion_id: room.id,
         codigo_habitacion: room.codigo_habitacion,
         nombre_habitacion: room.nombre_habitacion,
-        estado: status?.estado || "sin limpiar",
-        fecha_estado: status?.fecha_estado || "",
+        estado: status?.estado || "limpio",
+        fecha_estado: status?.fecha_estado || status?.fecha || "",
         prioridad: urgentRoomIds.has(room.id) ? "urgente" : (status?.prioridad || ""),
         notas: status?.notas || "",
-        fecha_actualizacion: status?.fecha_actualizacion || ""
+        fecha_actualizacion: status?.fecha_actualizacion || status?.fecha_creacion || ""
       };
     }),
     history
@@ -181,16 +200,18 @@ function setCleaningStatus(roomId, input) {
   const date = input.fecha || toISODate(new Date());
   const priority = input.prioridad || "";
   const notes = input.notas || "";
-  db.prepare(`
-    INSERT INTO room_cleaning_status (habitacion_id, estado, fecha_estado, prioridad, notas, fecha_actualizacion)
-    VALUES (?, ?, ?, ?, ?, datetime('now'))
-    ON CONFLICT(habitacion_id) DO UPDATE SET
-      estado = excluded.estado,
-      fecha_estado = excluded.fecha_estado,
-      prioridad = excluded.prioridad,
-      notas = excluded.notas,
-      fecha_actualizacion = datetime('now')
-  `).run(roomId, state, date, priority, notes);
+  if (date === toISODate(new Date())) {
+    db.prepare(`
+      INSERT INTO room_cleaning_status (habitacion_id, estado, fecha_estado, prioridad, notas, fecha_actualizacion)
+      VALUES (?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(habitacion_id) DO UPDATE SET
+        estado = excluded.estado,
+        fecha_estado = excluded.fecha_estado,
+        prioridad = excluded.prioridad,
+        notas = excluded.notas,
+        fecha_actualizacion = datetime('now')
+    `).run(roomId, state, date, priority, notes);
+  }
   db.prepare(`
     INSERT INTO room_cleaning_history (habitacion_id, fecha, estado, prioridad, notas)
     VALUES (?, ?, ?, ?, ?)

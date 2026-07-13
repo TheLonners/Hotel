@@ -42,10 +42,11 @@ HOST=0.0.0.0
 DATABASE_PATH=./data/hotel.sqlite
 UPLOADS_DIR=./uploads
 CORS_ORIGIN=*
+AUTH_ENABLED=false
 ADMIN_PASSWORD=
 ```
 
-`ADMIN_PASSWORD` es opcional. Si lo defines, el frontend permite guardar esa clave desde el boton `Clave` y la enviara en cada llamada API.
+La autenticacion esta desactivada temporalmente (`AUTH_ENABLED=false`). Cuando quieras activarla, cambia ese valor a `true`, define `ADMIN_PASSWORD` y reinicia el backend.
 
 ## Crear base de datos y datos de ejemplo
 
@@ -189,7 +190,7 @@ Para acceso remoto puedes exponer ese mismo puerto con una herramienta externa:
 - ngrok: ejecuta `ngrok http 3000` y abre la URL generada.
 - VPN propia: entra a la VPN y usa la IP interna del servidor.
 
-Si expones la app fuera de la red local, configura `ADMIN_PASSWORD`.
+Si expones la app fuera de la red local, activa la autenticacion con `AUTH_ENABLED=true` y configura `ADMIN_PASSWORD`.
 
 ## Funciones incluidas en el MVP
 

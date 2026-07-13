@@ -1,4 +1,4 @@
-import type { AirbnbFeed, Attachment, BillingAccount, Block, CleaningReport, Dashboard, Payment, Reservation, Room, TodayOperations } from "./types";
+import type { AirbnbFeed, Attachment, BackupRecord, BillingAccount, Block, CleaningEvidence, CleaningReport, Client, Dashboard, Payment, Reservation, Room, TodayOperations } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -23,11 +23,13 @@ export const api = {
   testRoomAirbnbIcal: (id: number, body: Record<string, unknown>) =>
     request<{ ok: boolean; events: number; message: string; room: Room }>(`/api/rooms/${id}/airbnb-ical/test`, { method: "POST", body: JSON.stringify(body) }),
   deleteRoom: (id: number) => request<{ ok: boolean }>(`/api/rooms/${id}`, { method: "DELETE" }),
+  clientByCedula: (cedula: string) => request<Client | null>(`/api/clients?${new URLSearchParams({ cedula })}`),
 
   reservations: (params: Record<string, string> = {}) => request<Reservation[]>(`/api/reservations?${new URLSearchParams(params)}`),
   reservation: (id: number) => request<Reservation>(`/api/reservations/${id}`),
   createReservation: (body: Record<string, unknown>) => request<Reservation>("/api/reservations", { method: "POST", body: JSON.stringify(body) }),
   updateReservation: (id: number, body: Record<string, unknown>) => request<Reservation>(`/api/reservations/${id}`, { method: "PUT", body: JSON.stringify(body) }),
+  updateArrival: (id: number, verified: boolean) => request<Reservation>(`/api/reservations/${id}/arrival`, { method: "PUT", body: JSON.stringify({ llegada_verificada: verified }) }),
   deleteReservation: (id: number) => request<{ ok: boolean }>(`/api/reservations/${id}`, { method: "DELETE" }),
 
   blocks: () => request<Block[]>("/api/blocks"),
@@ -42,6 +44,8 @@ export const api = {
   updateAirbnbFeed: (id: number, body: Record<string, unknown>) => request<AirbnbFeed>(`/api/airbnb-sync/feeds/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   deleteAirbnbFeed: (id: number) => request<{ ok: boolean }>(`/api/airbnb-sync/feeds/${id}`, { method: "DELETE" }),
   syncAirbnbFeed: (id: number) => request<Record<string, unknown>>(`/api/airbnb-sync/feeds/${id}/sync`, { method: "POST" }),
+  syncDueAirbnbFeeds: () => request<{ results: Record<string, unknown>[] }>("/api/airbnb-sync/sync-due", { method: "POST" }),
+  syncAllAirbnbFeeds: () => request<{ results: Record<string, unknown>[] }>("/api/airbnb-sync/sync-all", { method: "POST" }),
   previewAirbnbImport: (file: File) => {
     const form = new FormData();
     form.append("file", file);
@@ -67,6 +71,14 @@ export const api = {
   cleaning: (params: Record<string, string> = {}) => request<CleaningReport>(`/api/cleaning?${new URLSearchParams(params)}`),
   updateCleaning: (roomId: number, body: Record<string, unknown>) =>
     request<Record<string, unknown>>(`/api/cleaning/${roomId}`, { method: "PUT", body: JSON.stringify(body) }),
+  cleaningEvidence: (roomId: number, date: string) => request<CleaningEvidence[]>(`/api/cleaning/${roomId}/evidence?${new URLSearchParams({ date })}`),
+  uploadCleaningEvidence: (roomId: number, date: string, note: string, file: File) => {
+    const form = new FormData();
+    form.append("fecha", date);
+    form.append("nota", note);
+    form.append("file", file);
+    return request<CleaningEvidence>(`/api/cleaning/${roomId}/evidence`, { method: "POST", body: form });
+  },
   billingAccount: (params: Record<string, string> = {}) => request<BillingAccount>(`/api/billing-account?${new URLSearchParams(params)}`),
 
   importPreview: (file: File) => {
@@ -81,8 +93,12 @@ export const api = {
     form.append("file", file);
     return request<RoomImportPreview>("/api/import/rooms/preview", { method: "POST", body: form });
   },
-  importRoomsConfirm: (sessionId: string, force = false) =>
-    request<Record<string, unknown>>("/api/import/rooms/confirm", { method: "POST", body: JSON.stringify({ sessionId, force }) }),
+  importRoomsConfirm: (sessionId: string, mode: "atomic" | "valid_only" = "atomic") =>
+    request<Record<string, unknown>>("/api/import/rooms/confirm", { method: "POST", body: JSON.stringify({ sessionId, mode }) }),
+  backups: () => request<{ directory: string; items: BackupRecord[] }>("/api/backups"),
+  createBackup: (kind: "manual" | "daily" | "monthly" = "manual") =>
+    request<BackupRecord>("/api/backups", { method: "POST", body: JSON.stringify({ kind }) }),
+  validateBackup: (id: number) => request<{ ok: boolean; record: BackupRecord }>(`/api/backups/${id}/validate`, { method: "POST" }),
 
   downloadFile: async (path: string, filename: string) => {
     const headers = new Headers();

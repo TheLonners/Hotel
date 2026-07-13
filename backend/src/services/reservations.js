@@ -1,16 +1,49 @@
 const { db } = require("../database/db");
+const { createGuest, createProvisionalAirbnbGuest, linkGuest } = require("./guests");
 const { compareDates, diffNights, effectiveCheckOut, parseDateValue } = require("./dates");
 const { sortRooms } = require("./roomOrdering");
 
 function asNumber(value, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
-  const parsed = Number(String(value).replace(/[^\d.,-]/g, "").replace(/\./g, "").replace(",", "."));
-  return Number.isFinite(parsed) ? parsed : fallback;
+  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
+
+  let text = String(value).trim().replace(/\s+/g, "");
+  if (!text) return fallback;
+
+  const negative = /^-/.test(text) || /^\(.*\)$/.test(text);
+  text = text.replace(/[^\d.,-]/g, "").replace(/-/g, "");
+  if (!text) return fallback;
+
+  const lastDot = text.lastIndexOf(".");
+  const lastComma = text.lastIndexOf(",");
+  const decimalSeparator = lastDot > lastComma ? "." : lastComma > lastDot ? "," : "";
+
+  let normalized;
+  if (decimalSeparator) {
+    const separatorIndex = decimalSeparator === "." ? lastDot : lastComma;
+    const decimalDigits = text.length - separatorIndex - 1;
+    const integerPart = text.slice(0, separatorIndex).replace(/[.,]/g, "");
+    const decimalPart = text.slice(separatorIndex + 1).replace(/[.,]/g, "");
+    normalized = decimalDigits > 0 && decimalDigits <= 2
+      ? `${integerPart}.${decimalPart}`
+      : `${integerPart}${decimalPart}`;
+  } else {
+    normalized = text.replace(/[.,]/g, "");
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? (negative ? -parsed : parsed) : fallback;
 }
 
 function asInteger(value, fallback = 0) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function normalizeRoomNightlyPrice(value, fallback = 0) {
+  const parsed = asNumber(value, fallback);
+  if (parsed > 0 && parsed < 10000) return parsed * 1000;
+  return parsed;
 }
 
 function asBoolean(value) {
@@ -28,6 +61,83 @@ function computePaymentStatus(total, paid) {
 
 function normalizeReservationOrigin(value) {
   return String(value || "").trim().toLowerCase() === "airbnb" ? "airbnb" : "whatsapp";
+}
+
+function cleanText(value) {
+  return String(value || "").trim();
+}
+
+function normalizeRoomColor(value, fallback = "#4f9da6") {
+  const text = cleanText(value);
+  return /^#[0-9a-f]{6}$/i.test(text) ? text : fallback;
+}
+
+function splitGuestName(fullName, firstName = "", lastName = "") {
+  const nameParts = cleanText(firstName).split(/\s+/).filter(Boolean);
+  const lastParts = cleanText(lastName).split(/\s+/).filter(Boolean);
+  const fullParts = cleanText(fullName).split(/\s+/).filter(Boolean);
+
+  if (!nameParts.length && !lastParts.length && fullParts.length) {
+    if (fullParts.length === 1) {
+      nameParts.push(fullParts[0]);
+    } else if (fullParts.length === 2) {
+      nameParts.push(fullParts[0]);
+      lastParts.push(fullParts[1]);
+    } else if (fullParts.length === 3) {
+      nameParts.push(fullParts[0], fullParts[1]);
+      lastParts.push(fullParts[2]);
+    } else {
+      nameParts.push(fullParts[0], fullParts[1]);
+      lastParts.push(fullParts[fullParts.length - 2], fullParts[fullParts.length - 1]);
+    }
+  }
+
+  return {
+    primer_nombre: nameParts[0] || "",
+    segundo_nombre: nameParts.slice(1).join(" "),
+    primer_apellido: lastParts[0] || "",
+    segundo_apellido: lastParts.slice(1).join(" "),
+    nombre_completo: cleanText(fullName) || [...nameParts, ...lastParts].join(" ")
+  };
+}
+
+function getClientByCedula(cedula) {
+  const value = cleanText(cedula);
+  if (!value) return null;
+  return db.prepare("SELECT * FROM clients WHERE cedula = ?").get(value) || null;
+}
+
+function upsertClientFromReservation(payload) {
+  const cedula = cleanText(payload.cedula);
+  if (!cedula) return null;
+  const name = splitGuestName(payload.nombre_completo_huesped, payload.nombre_huesped, payload.apellido_huesped);
+  db.prepare(`
+    INSERT INTO clients (
+      cedula, primer_nombre, segundo_nombre, primer_apellido, segundo_apellido,
+      nombre_completo, correo, telefono, direccion, fecha_actualizacion
+    )
+    VALUES (
+      @cedula, @primer_nombre, @segundo_nombre, @primer_apellido, @segundo_apellido,
+      @nombre_completo, @correo, @telefono, @direccion, datetime('now')
+    )
+    ON CONFLICT(cedula) DO UPDATE SET
+      primer_nombre = excluded.primer_nombre,
+      segundo_nombre = excluded.segundo_nombre,
+      primer_apellido = excluded.primer_apellido,
+      segundo_apellido = excluded.segundo_apellido,
+      nombre_completo = excluded.nombre_completo,
+      correo = excluded.correo,
+      telefono = excluded.telefono,
+      direccion = excluded.direccion,
+      fecha_actualizacion = datetime('now')
+  `).run({
+    cedula,
+    ...name,
+    correo: cleanText(payload.correo),
+    telefono: cleanText(payload.telefono),
+    direccion: cleanText(payload.direccion)
+  });
+  return getClientByCedula(cedula);
 }
 
 function roomColor(index) {
@@ -92,24 +202,18 @@ function mirrorRoomAirbnbFeed(room) {
   if (existing) {
     db.prepare(`
       UPDATE airbnb_sync_feeds
-      SET nombre = @nombre,
-          ical_url = @ical_url,
-          activo = @activo,
-          sync_interval_minutes = @sync_interval_minutes,
+      SET nombre = ?,
+          ical_url = ?,
+          activo = ?,
+          sync_interval_minutes = ?,
           fecha_actualizacion = datetime('now')
-      WHERE id = @id
-    `).run(payload);
+      WHERE id = ?
+    `).run(payload.nombre, payload.ical_url, payload.activo, payload.sync_interval_minutes, payload.id);
   } else {
     db.prepare(`
       INSERT INTO airbnb_sync_feeds (habitacion_id, nombre, ical_url, activo, sync_interval_minutes)
-      VALUES (@habitacion_id, @nombre, @ical_url, @activo, @sync_interval_minutes)
-    `).run({
-      habitacion_id: payload.habitacion_id,
-      nombre: payload.nombre,
-      ical_url: payload.ical_url,
-      activo: payload.activo,
-      sync_interval_minutes: payload.sync_interval_minutes
-    });
+      VALUES (?, ?, ?, ?, ?)
+    `).run(payload.habitacion_id, payload.nombre, payload.ical_url, payload.activo, payload.sync_interval_minutes);
   }
 }
 
@@ -123,19 +227,24 @@ function getRoomByCode(code) {
 
 function createRoom(input) {
   const existing = getRoomByCode(input.codigo_habitacion);
-  if (existing) return existing;
+  if (existing) {
+    const error = new Error(`Ya existe una habitacion con el codigo ${existing.codigo_habitacion}.`);
+    error.status = 409;
+    throw error;
+  }
   const count = db.prepare("SELECT COUNT(*) AS total FROM rooms").get().total;
+  const color = normalizeRoomColor(input.color_calendario, roomColor(count));
   const info = db.prepare(`
       INSERT INTO rooms (
       codigo_habitacion, nombre_habitacion, tipo_habitacion, descripcion, acomodacion, capacidad,
       camas, tipo_cama, sofa_cama, tipo_vista, tina, jacuzzi_interno,
       precio_base_noche, estado, color_calendario, pendiente_revision,
-      airbnb_listing_id, airbnb_ical_url, airbnb_ical_activo
+      foto_url, airbnb_listing_id, airbnb_ical_url, airbnb_ical_activo
     )
     VALUES (@codigo_habitacion, @nombre_habitacion, @tipo_habitacion, @descripcion, @acomodacion, @capacidad,
       @camas, @tipo_cama, @sofa_cama, @tipo_vista, @tina, @jacuzzi_interno,
       @precio_base_noche, @estado, @color_calendario, @pendiente_revision,
-      @airbnb_listing_id, @airbnb_ical_url, @airbnb_ical_activo)
+      @foto_url, @airbnb_listing_id, @airbnb_ical_url, @airbnb_ical_activo)
   `).run({
     codigo_habitacion: String(input.codigo_habitacion || "").trim(),
     nombre_habitacion: String(input.nombre_habitacion || input.codigo_habitacion || "").trim(),
@@ -149,10 +258,11 @@ function createRoom(input) {
     tipo_vista: input.tipo_vista || "",
     tina: input.tina || "",
     jacuzzi_interno: input.jacuzzi_interno || "",
-    precio_base_noche: asNumber(input.precio_base_noche, 0),
+    precio_base_noche: normalizeRoomNightlyPrice(input.precio_base_noche, 0),
     estado: input.estado || "disponible",
-    color_calendario: input.color_calendario || roomColor(count),
+    color_calendario: color,
     pendiente_revision: asBoolean(input.pendiente_revision),
+    foto_url: String(input.foto_url || "").trim(),
     airbnb_listing_id: String(input.airbnb_listing_id || "").trim(),
     airbnb_ical_url: validateRoomIcalUrl(input.airbnb_ical_url),
     airbnb_ical_activo: asBoolean(input.airbnb_ical_activo)
@@ -165,6 +275,13 @@ function createRoom(input) {
 function updateRoom(id, input) {
   const current = getRoomById(id);
   if (!current) return null;
+  const nextCode = String(input.codigo_habitacion ?? current.codigo_habitacion).trim();
+  const duplicate = getRoomByCode(nextCode);
+  if (duplicate && duplicate.id !== id) {
+    const error = new Error(`Ya existe otra habitacion con el codigo ${duplicate.codigo_habitacion}.`);
+    error.status = 409;
+    throw error;
+  }
   db.prepare(`
     UPDATE rooms
     SET codigo_habitacion = @codigo_habitacion,
@@ -183,6 +300,7 @@ function updateRoom(id, input) {
         estado = @estado,
         color_calendario = @color_calendario,
         pendiente_revision = @pendiente_revision,
+        foto_url = @foto_url,
         airbnb_listing_id = @airbnb_listing_id,
         airbnb_ical_url = @airbnb_ical_url,
         airbnb_ical_activo = @airbnb_ical_activo,
@@ -190,7 +308,7 @@ function updateRoom(id, input) {
     WHERE id = @id
   `).run({
     id,
-    codigo_habitacion: String(input.codigo_habitacion ?? current.codigo_habitacion).trim(),
+    codigo_habitacion: nextCode,
     nombre_habitacion: String(input.nombre_habitacion ?? current.nombre_habitacion).trim(),
     tipo_habitacion: input.tipo_habitacion ?? current.tipo_habitacion,
     descripcion: input.descripcion ?? current.descripcion,
@@ -202,10 +320,11 @@ function updateRoom(id, input) {
     tipo_vista: input.tipo_vista ?? current.tipo_vista ?? "",
     tina: input.tina ?? current.tina ?? "",
     jacuzzi_interno: input.jacuzzi_interno ?? current.jacuzzi_interno ?? "",
-    precio_base_noche: asNumber(input.precio_base_noche ?? current.precio_base_noche, current.precio_base_noche),
+    precio_base_noche: normalizeRoomNightlyPrice(input.precio_base_noche ?? current.precio_base_noche, current.precio_base_noche),
     estado: input.estado ?? current.estado,
-    color_calendario: input.color_calendario ?? current.color_calendario,
+    color_calendario: normalizeRoomColor(input.color_calendario ?? current.color_calendario, current.color_calendario || "#4f9da6"),
     pendiente_revision: asBoolean(input.pendiente_revision ?? current.pendiente_revision),
+    foto_url: String(input.foto_url ?? current.foto_url ?? "").trim(),
     airbnb_listing_id: String(input.airbnb_listing_id ?? current.airbnb_listing_id ?? "").trim(),
     airbnb_ical_url: validateRoomIcalUrl(input.airbnb_ical_url ?? current.airbnb_ical_url),
     airbnb_ical_activo: asBoolean(input.airbnb_ical_activo ?? current.airbnb_ical_activo)
@@ -291,7 +410,12 @@ function getReservations(filters = {}) {
   if (filters.queo_ok === "1") where.push("r.queo_ok = 1");
   if (filters.con_observaciones === "1") where.push("length(trim(coalesce(r.observaciones, ''))) > 0");
   if (filters.con_comprobante === "1") where.push("EXISTS (SELECT 1 FROM attachments a WHERE a.reserva_id = r.id)");
-  if (filters.sin_comprobante === "1") where.push("NOT EXISTS (SELECT 1 FROM attachments a WHERE a.reserva_id = r.id)");
+  if (filters.sin_comprobante === "1") {
+    // Airbnb settles reservations directly on the platform; receipts are only
+    // required for the WhatsApp/manual booking workflow.
+    where.push("lower(coalesce(r.origen_reserva, '')) <> 'airbnb'");
+    where.push("NOT EXISTS (SELECT 1 FROM attachments a WHERE a.reserva_id = r.id)");
+  }
   if (filters.con_alertas === "1") where.push("EXISTS (SELECT 1 FROM alerts al WHERE al.reserva_id = r.id AND al.resuelta = 0)");
   if (filters.roomId) {
     where.push("EXISTS (SELECT 1 FROM reservation_rooms rr WHERE rr.reserva_id = r.id AND rr.habitacion_id = @roomId)");
@@ -333,8 +457,9 @@ function reservationDateRules(input) {
   return { checkIn, checkOut, stayType };
 }
 
-function validateAvailability(roomIds, checkIn, checkOut, excludeReservationId = null) {
+function validateAvailability(roomIds, checkIn, checkOut, excludeReservationId = null, options = {}) {
   const occupancyEnd = effectiveCheckOut(checkIn, checkOut);
+  const ignoreAirbnbBlocks = options.ignoreAirbnbBlocks ? 1 : 0;
   const conflicts = [];
 
   for (const roomId of roomIds) {
@@ -371,10 +496,14 @@ function validateAvailability(roomIds, checkIn, checkOut, excludeReservationId =
       SELECT b.id, b.motivo, b.fecha_inicio, b.fecha_fin
       FROM blocks b
       WHERE b.habitacion_id = @roomId
+        AND (@ignoreAirbnbBlocks = 0 OR (
+          lower(coalesce(b.origen_bloqueo, '')) <> 'airbnb'
+          AND lower(coalesce(b.tipo_bloqueo, '')) <> 'airbnb'
+        ))
         AND date(b.fecha_inicio) < date(@end)
         AND date(CASE WHEN b.fecha_fin <= b.fecha_inicio THEN date(b.fecha_inicio, '+1 day') ELSE b.fecha_fin END) > date(@start)
       LIMIT 1
-    `).get({ roomId, start: checkIn, end: occupancyEnd });
+    `).get({ roomId, start: checkIn, end: occupancyEnd, ignoreAirbnbBlocks });
 
     if (blockConflict) {
       conflicts.push({
@@ -505,10 +634,21 @@ function createReservation(input) {
     error.status = 400;
     throw error;
   }
-
-  validateAvailability(assignments.map((item) => item.habitacion_id), payload.fecha_ingreso, payload.fecha_salida);
+  if (payload.cantidad_huespedes < 1) {
+    const error = new Error("La cantidad de huespedes debe ser al menos 1.");
+    error.status = 400;
+    throw error;
+  }
+  if (payload.total_pago < 0 || payload.abono < 0 || payload.abono > payload.total_pago) {
+    const error = new Error("El abono debe estar entre 0 y el total de la reserva.");
+    error.status = 400;
+    throw error;
+  }
 
   const transaction = db.transaction(() => {
+    validateAvailability(assignments.map((item) => item.habitacion_id), payload.fecha_ingreso, payload.fecha_salida, null, {
+      ignoreAirbnbBlocks: payload.origen_reserva !== "airbnb"
+    });
     const info = db.prepare(`
       INSERT INTO reservations (
         numero_interno, numero_remision, nombre_completo_huesped, nombre_huesped, apellido_huesped,
@@ -527,6 +667,11 @@ function createReservation(input) {
     `).run(payload);
 
     insertRoomAssignments(info.lastInsertRowid, assignments);
+    if (!payload.numero_interno) {
+      db.prepare("UPDATE reservations SET numero_interno = ? WHERE id = ?")
+        .run(`VM-${new Date().getFullYear()}-${String(info.lastInsertRowid).padStart(6, "0")}`, info.lastInsertRowid);
+    }
+    upsertClientFromReservation(payload);
 
     if (payload.abono > 0) {
       db.prepare(`
@@ -541,6 +686,21 @@ function createReservation(input) {
         payload.numero_remision || "",
         input.initial_payment_note || "Abono inicial"
       );
+    }
+    const saved = getReservation(info.lastInsertRowid);
+    if (input.primary_guest_id) {
+      linkGuest(saved.id, Number(input.primary_guest_id), { isPrimaryGuest: true, inTransaction: true });
+    } else if (saved.origen_reserva === "airbnb") {
+      createProvisionalAirbnbGuest(saved, null, { inTransaction: true });
+    } else {
+      const guest = createGuest({
+        full_name_original: saved.nombre_completo_huesped,
+        document_number: saved.cedula,
+        email: saved.correo,
+        phone_number: saved.telefono,
+        source: "WHATSAPP"
+      });
+      linkGuest(saved.id, guest.id, { isPrimaryGuest: true, inTransaction: true });
     }
     return info.lastInsertRowid;
   });
@@ -558,9 +718,15 @@ function updateReservation(id, input) {
     FROM reservation_rooms WHERE reserva_id = ?
   `).all(id);
 
-  validateAvailability(assignments.map((item) => item.habitacion_id), payload.fecha_ingreso, payload.fecha_salida, id);
-
   const transaction = db.transaction(() => {
+    if (!assignments.length) {
+      const error = new Error("Una reserva debe conservar al menos una habitacion.");
+      error.status = 400;
+      throw error;
+    }
+    validateAvailability(assignments.map((item) => item.habitacion_id), payload.fecha_ingreso, payload.fecha_salida, id, {
+      ignoreAirbnbBlocks: payload.origen_reserva !== "airbnb"
+    });
     const updatePayload = {
       id,
       numero_interno: payload.numero_interno,
@@ -635,6 +801,7 @@ function updateReservation(id, input) {
       db.prepare("DELETE FROM reservation_rooms WHERE reserva_id = ?").run(id);
       insertRoomAssignments(id, assignments);
     }
+    upsertClientFromReservation(payload);
   });
 
   transaction();
@@ -648,29 +815,54 @@ function deleteReservation(id) {
   return true;
 }
 
+function validatePaymentAmount(reservation, amount, paidExcludingCurrent = 0) {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    const error = new Error("El pago debe ser mayor que cero.");
+    error.status = 400;
+    throw error;
+  }
+  if (paidExcludingCurrent + amount > Number(reservation.total_pago || 0) + 0.000001) {
+    const error = new Error("El pago supera el total de la reserva.");
+    error.status = 400;
+    throw error;
+  }
+}
+
 function addPayment(reservationId, input) {
-  const reservation = getReservation(reservationId);
-  if (!reservation) return null;
-  const info = db.prepare(`
+  const transaction = db.transaction(() => {
+    const reservation = getReservation(reservationId);
+    if (!reservation) return null;
+    const amount = asNumber(input.monto, 0);
+    const paid = Number(db.prepare("SELECT COALESCE(SUM(monto), 0) AS total FROM payments WHERE reserva_id = ?").get(reservationId).total || 0);
+    validatePaymentAmount(reservation, amount, paid);
+    const info = db.prepare(`
     INSERT INTO payments (reserva_id, monto, fecha_pago, metodo_pago, banco_o_medio, referencia_pago, nota)
     VALUES (@reserva_id, @monto, @fecha_pago, @metodo_pago, @banco_o_medio, @referencia_pago, @nota)
   `).run({
     reserva_id: reservationId,
-    monto: asNumber(input.monto, 0),
+    monto: amount,
     fecha_pago: parseDateValue(input.fecha_pago) || new Date().toISOString().slice(0, 10),
     metodo_pago: input.metodo_pago || reservation.metodo_pago || "transferencia",
     banco_o_medio: input.banco_o_medio || input.banco_o_medio_pago || reservation.banco_o_medio_pago || "",
     referencia_pago: input.referencia_pago || "",
     nota: input.nota || ""
   });
-  recalculateReservationPayments(reservationId);
-  return db.prepare("SELECT * FROM payments WHERE id = ?").get(info.lastInsertRowid);
+    recalculateReservationPayments(reservationId);
+    return info.lastInsertRowid;
+  });
+  const id = transaction();
+  return id ? db.prepare("SELECT * FROM payments WHERE id = ?").get(id) : null;
 }
 
 function updatePayment(id, input) {
   const current = db.prepare("SELECT * FROM payments WHERE id = ?").get(id);
   if (!current) return null;
-  db.prepare(`
+  const transaction = db.transaction(() => {
+    const reservation = getReservation(current.reserva_id);
+    const amount = asNumber(input.monto ?? current.monto, current.monto);
+    const paid = Number(db.prepare("SELECT COALESCE(SUM(monto), 0) AS total FROM payments WHERE reserva_id = ? AND id != ?").get(current.reserva_id, id).total || 0);
+    validatePaymentAmount(reservation, amount, paid);
+    db.prepare(`
     UPDATE payments
     SET monto = @monto,
         fecha_pago = @fecha_pago,
@@ -679,16 +871,18 @@ function updatePayment(id, input) {
         referencia_pago = @referencia_pago,
         nota = @nota
     WHERE id = @id
-  `).run({
+    `).run({
     id,
-    monto: asNumber(input.monto ?? current.monto, current.monto),
+    monto: amount,
     fecha_pago: parseDateValue(input.fecha_pago ?? current.fecha_pago) || current.fecha_pago,
     metodo_pago: input.metodo_pago ?? current.metodo_pago,
     banco_o_medio: input.banco_o_medio ?? current.banco_o_medio,
     referencia_pago: input.referencia_pago ?? current.referencia_pago,
     nota: input.nota ?? current.nota
+    });
+    recalculateReservationPayments(current.reserva_id);
   });
-  recalculateReservationPayments(current.reserva_id);
+  transaction();
   return db.prepare("SELECT * FROM payments WHERE id = ?").get(id);
 }
 
@@ -718,7 +912,7 @@ function availability({ checkIn, checkOut, guests = 1, type = "" }) {
   const nights = Math.max(1, diffNights(start, end));
   return sortRooms(rooms).map((room) => {
     try {
-      validateAvailability([room.id], start, end);
+      validateAvailability([room.id], start, end, null, { ignoreAirbnbBlocks: true });
       return { ...room, disponible: true, total_calculado: nights * Number(room.precio_base_noche || 0) };
     } catch (error) {
       return { ...room, disponible: false, total_calculado: nights * Number(room.precio_base_noche || 0), motivo: error.details?.[0]?.message || error.message };
@@ -731,6 +925,7 @@ module.exports = {
   asBoolean,
   asInteger,
   asNumber,
+  normalizeRoomNightlyPrice,
   availability,
   createReservation,
   createRoom,
@@ -738,11 +933,14 @@ module.exports = {
   deleteReservation,
   getReservation,
   getReservations,
+  getClientByCedula,
   getRoomByCode,
   getRoomById,
   recalculateReservationPayments,
+  splitGuestName,
   updatePayment,
   updateReservation,
+  upsertClientFromReservation,
   updateRoom,
   validateAvailability,
   validateRoomIcalUrl

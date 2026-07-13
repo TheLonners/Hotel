@@ -10,7 +10,9 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "seed": "node src/database/seed.js"
+    "seed": "node src/database/seed.js",
+    "backup": "node src/scripts/backup.js",
+    "test:integrity": "node src/scripts/verify-reservation-integrity.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

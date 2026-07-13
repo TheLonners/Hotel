@@ -8,6 +8,10 @@ const multer = require("multer");
 dotenv.config();
 
 const { db, databasePath, projectRoot } = require("./database/db");
+const { createUser, ensureBootstrapAdmin, login, publicUser, readSession } = require("./services/auth");
+const { listAudit, recordAudit } = require("./services/audit");
+const { createGuest, getGuest, linkGuest, searchGuests } = require("./services/guests");
+const { backupDir, createBackup, listBackups, runDueBackups, validateBackup } = require("./services/backupService");
 const {
   addPayment,
   availability,
@@ -16,6 +20,7 @@ const {
   createRoom,
   deletePayment,
   deleteReservation,
+  getClientByCedula,
   getReservation,
   getReservations,
   getRoomById,
@@ -33,6 +38,7 @@ const {
   createAirbnbFeed,
   deleteAirbnbFeed,
   listAirbnbFeeds,
+  syncAllAirbnbFeeds,
   syncAirbnbFeed,
   syncDueAirbnbFeeds,
   testRoomIcalLink,
@@ -62,26 +68,52 @@ const {
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const host = process.env.HOST || "0.0.0.0";
+const authEnabled = String(process.env.AUTH_ENABLED || "false").trim().toLowerCase() === "true";
 const airbnbSyncPollMinutes = Math.max(5, Number(process.env.AIRBNB_SYNC_POLL_MINUTES || 15));
 const uploadsDir = process.env.UPLOADS_DIR
   ? path.resolve(projectRoot, process.env.UPLOADS_DIR)
   : path.join(projectRoot, "uploads");
 fs.mkdirSync(uploadsDir, { recursive: true });
+ensureBootstrapAdmin();
 
 const corsOrigin = process.env.CORS_ORIGIN || "*";
 app.use(cors({ origin: corsOrigin === "*" ? true : corsOrigin.split(",").map((item) => item.trim()) }));
 app.use(express.json({ limit: "20mb" }));
-app.use("/uploads", express.static(uploadsDir));
-
-function requirePassword(req, res, next) {
-  const password = process.env.ADMIN_PASSWORD;
-  if (!password || !req.path.startsWith("/api")) return next();
-  const provided = req.headers["x-admin-password"] || String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-  if (provided === password) return next();
-  return res.status(401).json({ error: "Contraseña requerida." });
+function requireAuth(req, res, next) {
+  const apiPath = String(req.originalUrl || req.url || "").split("?")[0];
+  if (!apiPath.startsWith("/api") || apiPath === "/api/health" || apiPath === "/api/auth/login") return next();
+  if (!authEnabled) {
+    req.user = { id: null, username: "local", role: "admin", active: true };
+    return next();
+  }
+  const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const sessionUser = readSession(token);
+  if (sessionUser) { req.user = publicUser(sessionUser); return next(); }
+  const legacy = String(req.headers["x-admin-password"] || "");
+  if (legacy && process.env.ADMIN_PASSWORD && legacy === process.env.ADMIN_PASSWORD) {
+    const admin = db.prepare("SELECT * FROM users WHERE role = 'admin' AND active = 1 ORDER BY id LIMIT 1").get();
+    if (admin) { req.user = publicUser(admin); return next(); }
+  }
+  const userCount = db.prepare("SELECT COUNT(*) AS total FROM users").get().total;
+  if (!userCount) return res.status(503).json({ error: "Autenticacion pendiente de configuracion." });
+  return res.status(401).json({ error: "Inicia sesión para acceder a la administración." });
 }
 
-app.use(requirePassword);
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!authEnabled) return next();
+    if (!req.user || !roles.includes(req.user.role)) return res.status(403).json({ error: "No tienes permiso para esta acción." });
+    return next();
+  };
+}
+
+app.post("/api/auth/login", (req, res) => {
+  const result = login(req.body?.username, req.body?.password);
+  if (!result) return res.status(401).json({ error: "Usuario o contraseña inválidos." });
+  return res.json(result);
+});
+
+app.use(requireAuth);
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadsDir),
@@ -112,7 +144,7 @@ function workbookFileFilter(_req, file, cb) {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "text/csv"
   ]);
-  if (allowedExtensions.has(extension) || allowedTypes.has(file.mimetype)) return cb(null, true);
+  if (allowedExtensions.has(extension) && (!file.mimetype || allowedTypes.has(file.mimetype))) return cb(null, true);
 
   const error = new Error("Solo se aceptan archivos Excel o CSV.");
   error.status = 400;
@@ -148,12 +180,79 @@ function sendPdf(res, fileName, buffer) {
 }
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, databasePath, uploadsDir });
+  res.json({ ok: true });
+});
+
+app.get("/api/auth/me", (req, res) => res.json({ user: req.user || null }));
+
+app.get("/api/audit", requireRole("admin"), (req, res) => res.json(listAudit(req.query.entity_type || "", req.query.entity_id || "")));
+
+app.get("/api/backups", requireRole("admin"), (_req, res) => {
+  res.json({ directory: backupDir, items: listBackups() });
+});
+
+app.post("/api/backups", requireRole("admin"), asyncRoute(async (req, res) => {
+  const kind = ["manual", "daily", "monthly"].includes(req.body?.kind) ? req.body.kind : "manual";
+  res.status(201).json(await createBackup({ kind, actorUserId: req.user.id }));
+}));
+
+app.post("/api/backups/:id/validate", requireRole("admin"), (req, res) => {
+  const record = validateBackup(Number(req.params.id));
+  if (!record) return res.status(404).json({ error: "Backup no encontrado." });
+  return res.json({ ok: true, record });
+});
+
+app.get("/api/users", requireRole("admin"), (_req, res) => {
+  res.json(db.prepare("SELECT id, username, role, active, created_at, updated_at FROM users ORDER BY username").all());
+});
+
+app.post("/api/users", requireRole("admin"), (req, res) => {
+  res.status(201).json(createUser(req.body || {}, req.user.id));
+});
+
+app.get("/uploads/:file", requireRole("admin", "recepcion"), (req, res) => {
+  const file = path.basename(req.params.file);
+  const known = db.prepare(`
+    SELECT id FROM attachments WHERE ruta_archivo = ?
+    UNION ALL
+    SELECT id FROM cleaning_evidence WHERE ruta_archivo = ?
+    LIMIT 1
+  `).get(`/uploads/${file}`, `/uploads/${file}`);
+  if (!known) return res.status(404).json({ error: "Archivo no encontrado." });
+  return res.sendFile(path.join(uploadsDir, file));
 });
 
 app.get("/api/rooms", (_req, res) => {
   const rooms = sortRooms(db.prepare("SELECT * FROM rooms").all());
   res.json(rooms);
+});
+
+app.get("/api/clients", (req, res) => {
+  const cedula = String(req.query.cedula || "").trim();
+  if (!cedula) return res.status(400).json({ error: "Cedula requerida." });
+  res.json(getClientByCedula(cedula));
+});
+
+app.get("/api/guests", requireRole("admin", "recepcion", "consulta"), (req, res) => {
+  res.json(searchGuests(req.query.q || ""));
+});
+
+app.get("/api/guests/:id", requireRole("admin", "recepcion", "consulta"), (req, res) => {
+  const guest = getGuest(Number(req.params.id));
+  if (!guest) return res.status(404).json({ error: "Huésped no encontrado." });
+  res.json(guest);
+});
+
+app.post("/api/guests", requireRole("admin", "recepcion"), (req, res) => {
+  res.status(201).json(createGuest(req.body || {}, req.user.id));
+});
+
+app.post("/api/reservations/:id/guests", requireRole("admin", "recepcion"), (req, res) => {
+  linkGuest(Number(req.params.id), Number(req.body?.guest_id), {
+    isPrimaryGuest: Boolean(req.body?.is_primary_guest),
+    guestCategory: req.body?.guest_category || "adult"
+  }, req.user.id);
+  res.json(getReservation(Number(req.params.id)));
 });
 
 app.post("/api/rooms", asyncRoute(async (req, res) => {
@@ -198,6 +297,15 @@ app.put("/api/reservations/:id", asyncRoute(async (req, res) => {
   res.json(reservation);
 }));
 
+app.put("/api/reservations/:id/arrival", (req, res) => {
+  const id = Number(req.params.id);
+  const reservation = getReservation(id);
+  if (!reservation) return res.status(404).json({ error: "Reserva no encontrada." });
+  const verified = req.body?.llegada_verificada ? 1 : 0;
+  db.prepare("UPDATE reservations SET llegada_verificada = ?, fecha_actualizacion = datetime('now') WHERE id = ?").run(verified, id);
+  res.json(getReservation(id));
+});
+
 app.delete("/api/reservations/:id", (req, res) => {
   if (!deleteReservation(Number(req.params.id))) return res.status(404).json({ error: "Reserva no encontrada." });
   res.json({ ok: true });
@@ -209,7 +317,9 @@ app.post("/api/reservations/:id/rooms", asyncRoute(async (req, res) => {
   const roomId = Number(req.body.roomId || req.body.habitacion_id);
   const room = getRoomById(roomId);
   if (!room) return res.status(404).json({ error: "Habitacion no encontrada." });
-  validateAvailability([roomId], reservation.fecha_ingreso, reservation.fecha_salida, reservation.id);
+  validateAvailability([roomId], reservation.fecha_ingreso, reservation.fecha_salida, reservation.id, {
+    ignoreAirbnbBlocks: reservation.origen_reserva !== "airbnb"
+  });
   db.prepare(`
     INSERT INTO reservation_rooms (reserva_id, habitacion_id, codigo_habitacion_original, precio_asignado, notas)
     VALUES (?, ?, ?, ?, ?)
@@ -301,6 +411,29 @@ app.put("/api/cleaning/:roomId", (req, res) => {
   res.json(setCleaningStatus(room.id, req.body));
 });
 
+app.get("/api/cleaning/:roomId/evidence", (req, res) => {
+  const room = getRoomById(Number(req.params.roomId));
+  if (!room) return res.status(404).json({ error: "Habitacion no encontrada." });
+  const date = parseDateValue(req.query.date) || toISODate(new Date());
+  res.json(db.prepare(`
+    SELECT * FROM cleaning_evidence
+    WHERE habitacion_id = ? AND fecha = ?
+    ORDER BY fecha_subida DESC, id DESC
+  `).all(room.id, date));
+});
+
+app.post("/api/cleaning/:roomId/evidence", upload.single("file"), (req, res) => {
+  const room = getRoomById(Number(req.params.roomId));
+  if (!room) return res.status(404).json({ error: "Habitacion no encontrada." });
+  if (!req.file || !req.file.mimetype.startsWith("image/")) return res.status(400).json({ error: "Adjunta una imagen de evidencia." });
+  const date = parseDateValue(req.body.fecha) || toISODate(new Date());
+  const result = db.prepare(`
+    INSERT INTO cleaning_evidence (habitacion_id, fecha, nombre_archivo, ruta_archivo, tipo_archivo, nota)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(room.id, date, req.file.originalname, `/uploads/${req.file.filename}`, req.file.mimetype, req.body.nota || "");
+  res.status(201).json(db.prepare("SELECT * FROM cleaning_evidence WHERE id = ?").get(result.lastInsertRowid));
+});
+
 app.get("/api/cleaning/export.csv", (req, res) => {
   const date = parseDateValue(req.query.date) || toISODate(new Date());
   sendCsv(res, `limpieza-${date}.csv`, cleaningCsv(date));
@@ -325,6 +458,23 @@ function getBlockWithRoom(id) {
   `).get(id);
 }
 
+function validateBlockAvailability(roomId, start, end, excludeBlockId = null) {
+  const occupancyEnd = effectiveCheckOut(start, end);
+  const reservation = db.prepare(`
+    SELECT r.id FROM reservations r JOIN reservation_rooms rr ON rr.reserva_id = r.id
+    WHERE rr.habitacion_id = ? AND r.estado_reserva NOT IN ('cancelada')
+      AND date(r.fecha_ingreso) < date(?)
+      AND date(CASE WHEN r.fecha_salida <= r.fecha_ingreso THEN date(r.fecha_ingreso, '+1 day') ELSE r.fecha_salida END) > date(?) LIMIT 1
+  `).get(roomId, occupancyEnd, start);
+  if (reservation) { const error = new Error("El bloqueo cruza con una reserva existente."); error.status = 409; throw error; }
+  const block = db.prepare(`
+    SELECT id FROM blocks WHERE habitacion_id = ? AND (? IS NULL OR id != ?)
+      AND date(fecha_inicio) < date(?)
+      AND date(CASE WHEN fecha_fin <= fecha_inicio THEN date(fecha_inicio, '+1 day') ELSE fecha_fin END) > date(?) LIMIT 1
+  `).get(roomId, excludeBlockId, excludeBlockId, occupancyEnd, start);
+  if (block) { const error = new Error("El bloqueo cruza con otro bloqueo."); error.status = 409; throw error; }
+}
+
 app.post("/api/blocks", asyncRoute(async (req, res) => {
   const roomId = Number(req.body.habitacion_id || req.body.roomId);
   const room = getRoomById(roomId);
@@ -332,17 +482,18 @@ app.post("/api/blocks", asyncRoute(async (req, res) => {
   const start = parseDateValue(req.body.fecha_inicio);
   const end = parseDateValue(req.body.fecha_fin);
   if (!start || !end || compareDates(end, start) < 0) return res.status(400).json({ error: "Fechas de bloqueo invalidas." });
-  validateAvailability([roomId], start, end);
   const origenBloqueo = ["airbnb", "evento"].includes(String(req.body.origen_bloqueo || "").toLowerCase())
     ? String(req.body.origen_bloqueo).toLowerCase()
     : "manual";
   const tipoBloqueo = ["airbnb", "evento", "manual"].includes(String(req.body.tipo_bloqueo || "").toLowerCase())
     ? String(req.body.tipo_bloqueo).toLowerCase()
     : origenBloqueo;
-  const info = db.prepare(`
+  const info = db.transaction(() => {
+    validateBlockAvailability(roomId, start, end);
+    return db.prepare(`
     INSERT INTO blocks (habitacion_id, fecha_inicio, fecha_fin, motivo, notas, origen_bloqueo, tipo_bloqueo, grupo_bloqueo)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
+    `).run(
     roomId,
     start,
     end,
@@ -350,8 +501,9 @@ app.post("/api/blocks", asyncRoute(async (req, res) => {
     req.body.notas || "",
     origenBloqueo,
     tipoBloqueo,
-    req.body.grupo_bloqueo || ""
-  );
+      req.body.grupo_bloqueo || ""
+    );
+  })();
   res.status(201).json(getBlockWithRoom(info.lastInsertRowid));
 }));
 
@@ -367,13 +519,18 @@ app.put("/api/blocks/:id", asyncRoute(async (req, res) => {
   const tipoBloqueo = ["airbnb", "evento", "manual"].includes(String(req.body.tipo_bloqueo ?? block.tipo_bloqueo ?? "").toLowerCase())
     ? String(req.body.tipo_bloqueo ?? block.tipo_bloqueo).toLowerCase()
     : origenBloqueo;
-  db.prepare(`
+  const roomId = Number(req.body.habitacion_id || req.body.roomId || block.habitacion_id);
+  const room = getRoomById(roomId);
+  if (!room) return res.status(404).json({ error: "Habitacion no encontrada." });
+  db.transaction(() => {
+    validateBlockAvailability(roomId, start, end, block.id);
+    db.prepare(`
     UPDATE blocks
     SET habitacion_id = ?, fecha_inicio = ?, fecha_fin = ?, motivo = ?, notas = ?,
         origen_bloqueo = ?, tipo_bloqueo = ?, grupo_bloqueo = ?
     WHERE id = ?
-  `).run(
-    Number(req.body.habitacion_id || req.body.roomId || block.habitacion_id),
+    `).run(
+    roomId,
     start,
     end,
     req.body.motivo ?? block.motivo,
@@ -381,8 +538,9 @@ app.put("/api/blocks/:id", asyncRoute(async (req, res) => {
     origenBloqueo,
     tipoBloqueo,
     req.body.grupo_bloqueo ?? block.grupo_bloqueo ?? "",
-    block.id
-  );
+      block.id
+    );
+  })();
   res.json(getBlockWithRoom(block.id));
 }));
 
@@ -417,6 +575,10 @@ app.post("/api/airbnb-sync/feeds/:id/sync", asyncRoute(async (req, res) => {
 
 app.post("/api/airbnb-sync/sync-due", asyncRoute(async (_req, res) => {
   res.json({ results: await syncDueAirbnbFeeds() });
+}));
+
+app.post("/api/airbnb-sync/sync-all", asyncRoute(async (_req, res) => {
+  res.json({ results: await syncAllAirbnbFeeds() });
 }));
 
 app.post("/api/airbnb-sync/import-names", memoryUpload.single("file"), asyncRoute(async (req, res) => {
@@ -480,7 +642,7 @@ app.post("/api/import/rooms/preview", memoryUpload.single("file"), asyncRoute(as
 }));
 
 app.post("/api/import/rooms/confirm", asyncRoute(async (req, res) => {
-  const result = confirmRoomsImport(req.body.sessionId, { force: Boolean(req.body.force) });
+  const result = await confirmRoomsImport(req.body.sessionId, { mode: req.body.mode });
   res.json(result);
 }));
 
@@ -820,3 +982,17 @@ setInterval(() => {
     console.error("Error en sincronizacion automatica Airbnb:", error);
   });
 }, airbnbSyncPollMinutes * 60 * 1000);
+
+setTimeout(() => {
+  syncDueAirbnbFeeds().catch((error) => {
+    console.error("Error en sincronizacion inicial Airbnb:", error);
+  });
+}, 5000);
+
+setTimeout(() => {
+  runDueBackups().catch((error) => console.error("Error en backup programado:", error));
+}, 10000);
+
+setInterval(() => {
+  runDueBackups().catch((error) => console.error("Error en backup programado:", error));
+}, 60 * 60 * 1000);

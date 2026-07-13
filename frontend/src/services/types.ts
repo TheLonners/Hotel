@@ -17,6 +17,7 @@ export interface Room {
   precio_base_noche: number;
   estado: RoomStatus;
   color_calendario: string;
+  foto_url: string;
   pendiente_revision: number;
   airbnb_listing_id: string;
   airbnb_ical_url: string;
@@ -60,6 +61,33 @@ export interface Attachment {
   nota: string;
 }
 
+export interface BackupRecord {
+  id: number;
+  kind: string;
+  status: string;
+  file_name: string;
+  file_path: string;
+  sha256: string;
+  size_bytes: number;
+  protected: number;
+  created_at: string;
+}
+
+export interface Client {
+  id: number;
+  cedula: string;
+  primer_nombre: string;
+  segundo_nombre: string;
+  primer_apellido: string;
+  segundo_apellido: string;
+  nombre_completo: string;
+  correo: string;
+  telefono: string;
+  direccion: string;
+  fecha_creacion: string;
+  fecha_actualizacion: string;
+}
+
 export interface AlertItem {
   id: number;
   reserva_id?: number;
@@ -96,6 +124,7 @@ export interface Reservation {
   banco_o_medio_pago: string;
   metodo_pago: string;
   estado_reserva: string;
+  llegada_verificada: number | boolean;
   estado_pago: string;
   origen_reserva: string;
   airbnb_ok: boolean;
@@ -234,6 +263,17 @@ export interface CleaningReport {
     codigo_habitacion: string;
     nombre_habitacion: string;
   }>;
+}
+
+export interface CleaningEvidence {
+  id: number;
+  habitacion_id: number;
+  fecha: string;
+  nombre_archivo: string;
+  ruta_archivo: string;
+  tipo_archivo: string;
+  nota: string;
+  fecha_subida: string;
 }
 
 export interface BillingItem {

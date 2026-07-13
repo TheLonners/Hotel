@@ -10,7 +10,8 @@
     "dev:backend": "pnpm --filter hotel-reservas-backend dev",
     "dev:frontend": "pnpm --filter hotel-reservas-frontend dev",
     "typecheck": "pnpm --filter hotel-reservas-frontend typecheck",
-    "seed": "pnpm --filter hotel-reservas-backend seed"
+    "seed": "pnpm --filter hotel-reservas-backend seed",
+    "backup": "pnpm --filter hotel-reservas-backend backup"
   },
   "engines": {
     "node": ">=24"

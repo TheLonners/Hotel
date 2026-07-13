@@ -46,7 +46,7 @@ export function effectiveEnd(start: string, end: string) {
 export function calendarRange(month: string) {
   const [year, monthNumber] = month.split("-").map(Number);
   const firstDay = toISO(new Date(Date.UTC(year, monthNumber - 1, 1)));
-  const rangeStart = month === currentMonth ? addDays(today, -1) : addDays(firstDay, -45);
+  const rangeStart = addDays(firstDay, -45);
   return {
     start: rangeStart,
     end: addDays(firstDay, 120)

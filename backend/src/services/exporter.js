@@ -1,12 +1,23 @@
-const { getReservations } = require("./reservations");
+const { getReservations, splitGuestName } = require("./reservations");
 const { db } = require("../database/db");
 const { sortRooms } = require("./roomOrdering");
 
 function csvEscape(value) {
   if (value === null || value === undefined) return "";
-  const text = String(value);
+  const raw = String(value);
+  const text = /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
   if (/[",\n\r;]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
   return text;
+}
+
+function maskIcalUrl(value) {
+  if (!value) return "";
+  try {
+    const url = new URL(value);
+    return `${url.protocol}//${url.hostname}/…/${url.pathname.split("/").filter(Boolean).slice(-1)[0] || "calendar.ics"}`;
+  } catch (_error) {
+    return "Integración configurada";
+  }
 }
 
 function makeCsv(headers, rows) {
@@ -26,6 +37,10 @@ function exportReservationsExcel(filters = {}) {
   const headers = [
     "#",
     "NOMBRE",
+    "primer_nombre",
+    "segundo_nombre",
+    "primer_apellido",
+    "segundo_apellido",
     "email",
     "Teléfono",
     "CC",
@@ -48,9 +63,15 @@ function exportReservationsExcel(filters = {}) {
     "QUEO",
     "OBSERVACIONES"
   ];
-  const rows = reservations.map((reservation) => ({
+  const rows = reservations.map((reservation) => {
+    const name = splitGuestName(reservation.nombre_completo_huesped, reservation.nombre_huesped, reservation.apellido_huesped);
+    return ({
     "#": reservation.numero_interno || reservation.id,
     "NOMBRE": reservation.nombre_completo_huesped,
+    primer_nombre: name.primer_nombre,
+    segundo_nombre: name.segundo_nombre,
+    primer_apellido: name.primer_apellido,
+    segundo_apellido: name.segundo_apellido,
     "email": reservation.correo,
     "Teléfono": reservation.telefono,
     "CC": reservation.cedula,
@@ -72,7 +93,8 @@ function exportReservationsExcel(filters = {}) {
     "SIIGO": reservation.siigo_ok ? "SI" : "",
     "QUEO": reservation.queo_ok ? "SI" : "",
     "OBSERVACIONES": reservation.observaciones
-  }));
+    });
+  });
   return makeCsv(headers, rows);
 }
 
@@ -82,6 +104,10 @@ function exportReservationsNormalized(filters = {}) {
     "id_reserva",
     "numero_remision",
     "nombre_completo_huesped",
+    "primer_nombre",
+    "segundo_nombre",
+    "primer_apellido",
+    "segundo_apellido",
     "cedula",
     "correo",
     "telefono",
@@ -108,10 +134,16 @@ function exportReservationsNormalized(filters = {}) {
     "cantidad_comprobantes",
     "fecha_creacion"
   ];
-  const rows = reservations.map((reservation) => ({
+  const rows = reservations.map((reservation) => {
+    const name = splitGuestName(reservation.nombre_completo_huesped, reservation.nombre_huesped, reservation.apellido_huesped);
+    return ({
     id_reserva: reservation.id,
     numero_remision: reservation.numero_remision,
     nombre_completo_huesped: reservation.nombre_completo_huesped,
+    primer_nombre: name.primer_nombre,
+    segundo_nombre: name.segundo_nombre,
+    primer_apellido: name.primer_apellido,
+    segundo_apellido: name.segundo_apellido,
     cedula: reservation.cedula,
     correo: reservation.correo,
     telefono: reservation.telefono,
@@ -137,7 +169,8 @@ function exportReservationsNormalized(filters = {}) {
     observaciones: reservation.observaciones,
     cantidad_comprobantes: reservation.attachments.length,
     fecha_creacion: reservation.fecha_creacion
-  }));
+    });
+  });
   return makeCsv(headers, rows);
 }
 
@@ -160,11 +193,15 @@ function exportRooms() {
     "precio_base_noche",
     "estado",
     "color_calendario",
+    "foto_url",
+    "airbnb_listing_id",
+    "airbnb_ical_url_protegida",
+    "airbnb_ical_activo",
     "pendiente_revision",
     "fecha_creacion",
     "fecha_actualizacion"
   ];
-  return makeCsv(headers, rows);
+  return makeCsv(headers, rows.map((room) => ({ ...room, airbnb_ical_url_protegida: maskIcalUrl(room.airbnb_ical_url) })));
 }
 
 function exportPayments() {

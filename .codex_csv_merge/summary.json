@@ -1,0 +1,94 @@
+{
+  "historicalRows": 999,
+  "pendingRows": 47,
+  "historicalHeaders": [
+    "﻿Fecha",
+    "Llega en esta fecha",
+    "Tipo",
+    "Código de confirmación",
+    "Fecha de la reservación",
+    "Fecha de inicio",
+    "Fecha de finalización",
+    "Noches",
+    "Huésped",
+    "Anuncio",
+    "Detalles",
+    "Código de referencia",
+    "Moneda",
+    "Monto",
+    "Total pagado",
+    "Tarifa por servicio",
+    "Tarifa de Pago rápido",
+    "Tarifa de limpieza",
+    "Ingresos brutos",
+    "Impuestos liquidados por Airbnb",
+    "Ingresos del año"
+  ],
+  "pendingHeaders": [
+    "﻿Date",
+    "Type",
+    "Confirmation code",
+    "Booking date",
+    "Start date",
+    "End date",
+    "Nights",
+    "Guest",
+    "Listing",
+    "Details",
+    "Reference code",
+    "Currency",
+    "Amount",
+    "Service fee",
+    "Cleaning fee",
+    "Gross earnings",
+    "Airbnb remitted tax",
+    "Earnings year"
+  ],
+  "joinKey": {
+    "historical": "Código de confirmación",
+    "pending": "Confirmation code"
+  },
+  "nameColumns": {
+    "historical": "Huésped",
+    "pending": "Guest"
+  },
+  "matched": 0,
+  "notFound": 47,
+  "pendingWithOriginalName": 47,
+  "pendingWithoutName": 0,
+  "duplicateHistoricalIds": [],
+  "duplicatePendingIds": [],
+  "sample": [
+    {
+      "id": "HMMCQDEADT",
+      "originalName": "Adriana Marcela Portela Laverde",
+      "crossedName": "",
+      "status": "No coincidió; se conservó Guest"
+    },
+    {
+      "id": "HMDD5WH3FJ",
+      "originalName": "Jenny Gómez",
+      "crossedName": "",
+      "status": "No coincidió; se conservó Guest"
+    },
+    {
+      "id": "HM5RSS29RR",
+      "originalName": "Juan Esteban Vargas Preciado",
+      "crossedName": "",
+      "status": "No coincidió; se conservó Guest"
+    },
+    {
+      "id": "HMF4QYDYDM",
+      "originalName": "Gabriela Cotame",
+      "crossedName": "",
+      "status": "No coincidió; se conservó Guest"
+    },
+    {
+      "id": "HMFXKTQ494",
+      "originalName": "Juan Camilo Velasquez",
+      "crossedName": "",
+      "status": "No coincidió; se conservó Guest"
+    }
+  ],
+  "outputPath": "C:/Users/Nick-Victus/Documents/Hotel/.codex_csv_merge/airbnb_pending_cruzado.csv"
+}
