@@ -15,6 +15,7 @@ import {
   CircleCheck,
   CreditCard,
   Download,
+  ExternalLink,
   FileSpreadsheet,
   FileText,
   Hash,
@@ -58,7 +59,7 @@ import {
   today
 } from "./lib/hotel-utils";
 import { api, type ImportPreview, type RoomImportPreview } from "./services/api";
-import type { AirbnbFeed, Attachment, BillingAccount, Block, CleaningEvidence, CleaningReport, CleaningRoom, Dashboard, OperationRow, Reservation, Room, TodayOperations } from "./services/types";
+import type { AirbnbFeed, AirbnbListingDetailsResponse, Attachment, BillingAccount, Block, CleaningEvidence, CleaningReport, CleaningRoom, Dashboard, OperationRow, Reservation, Room, TodayOperations } from "./services/types";
 
 type View = "today" | "calendar" | "cleaning" | "dashboard" | "rooms" | "airbnb" | "airbnbReservations" | "import" | "billing";
 
@@ -119,6 +120,11 @@ function reservationCode(reservation: Pick<Reservation, "id" | "numero_interno" 
   if (reservation.numero_interno) return reservation.numero_interno;
   const year = String(reservation.fecha_creacion || today).slice(0, 4) || String(new Date().getFullYear());
   return `VM-${year}-${String(reservation.id).padStart(6, "0")}`;
+}
+
+function extractAirbnbReservationUrl(notes: string) {
+  const match = String(notes || "").match(/https?:\/\/(?:www\.)?airbnb\.com\/[^\s<>"')]+/i);
+  return match?.[0]?.replace(/[.,;]+$/, "") || "";
 }
 
 function slugText(value: string) {
@@ -1027,12 +1033,24 @@ function DetailPanel(props: { reservation: Reservation; onClose: () => void; onE
   const [remisionValue, setRemisionValue] = useState(props.reservation.numero_remision || "");
   const [remisionSaving, setRemisionSaving] = useState(false);
   const [remisionMessage, setRemisionMessage] = useState("");
+  const [airbnbGuestName, setAirbnbGuestName] = useState("");
+  const [airbnbGuestSaving, setAirbnbGuestSaving] = useState(false);
+  const [airbnbGuestMessage, setAirbnbGuestMessage] = useState("");
   const reservation = props.reservation;
+  const isAirbnbReservation = reservation.origen_reserva.trim().toLowerCase() === "airbnb";
+  const needsAirbnbGuestReview = isAirbnbReservation
+    && (!reservation.nombre_completo_huesped.trim() || isAirbnbPlaceholderName(reservation.nombre_completo_huesped));
+  const airbnbIcalUrl = reservation.rooms.find((room) => room.airbnb_ical_url?.trim())?.airbnb_ical_url.trim() || "";
+  const airbnbReservationUrl = extractAirbnbReservationUrl(reservation.observaciones);
+  const airbnbValidationUrl = airbnbIcalUrl || airbnbReservationUrl;
 
   useEffect(() => {
     setRemisionValue(props.reservation.numero_remision || "");
     setRemisionMessage("");
-  }, [props.reservation.id, props.reservation.numero_remision]);
+    const currentName = props.reservation.nombre_completo_huesped || "";
+    setAirbnbGuestName(isAirbnbPlaceholderName(currentName) ? "" : currentName);
+    setAirbnbGuestMessage("");
+  }, [props.reservation.id, props.reservation.numero_remision, props.reservation.nombre_completo_huesped]);
 
   const refreshReservation = async () => {
     props.onChanged();
@@ -1093,6 +1111,29 @@ function DetailPanel(props: { reservation: Reservation; onClose: () => void; onE
     refreshReservation();
   };
 
+  const saveAirbnbGuestName = async () => {
+    const name = airbnbGuestName.trim();
+    if (!name) {
+      setAirbnbGuestMessage("Escribe el nombre del huesped antes de guardar.");
+      return;
+    }
+    setAirbnbGuestSaving(true);
+    setAirbnbGuestMessage("");
+    try {
+      await api.updateReservation(reservation.id, {
+        nombre_completo_huesped: name,
+        origen_reserva: "airbnb",
+        airbnb_ok: true
+      });
+      setAirbnbGuestMessage("Nombre actualizado correctamente.");
+      refreshReservation();
+    } catch (err) {
+      setAirbnbGuestMessage(err instanceof Error ? err.message : "No se pudo actualizar el nombre.");
+    } finally {
+      setAirbnbGuestSaving(false);
+    }
+  };
+
   return (
     <aside className="detail-panel reservation-detail-panel" role="dialog" aria-modal="true" aria-labelledby="reservation-detail-title">
       <div className="panel-header">
@@ -1131,6 +1172,36 @@ function DetailPanel(props: { reservation: Reservation; onClose: () => void; onE
         <span>Direccion</span><strong>{reservation.direccion || "Sin dato"}</strong>
         <span>Banco/medio</span><strong>{reservation.banco_o_medio_pago || "Sin dato"}</strong>
       </div>
+
+      {needsAirbnbGuestReview && (
+        <div className="panel-section airbnb-validation-section">
+          <div className="airbnb-validation-heading">
+            <div>
+              <h3>Validar reserva Airbnb</h3>
+              <small>Esta reserva no trae el nombre del huésped desde el iCal.</small>
+            </div>
+            {airbnbValidationUrl && (
+              <a className="airbnb-ical-button" href={airbnbValidationUrl} target="_blank" rel="noreferrer">
+                <ExternalLink size={16} />{airbnbIcalUrl ? "Abrir URL iCal" : "Abrir reserva Airbnb"}
+              </a>
+            )}
+          </div>
+          {airbnbIcalUrl && <code className="airbnb-ical-url">{airbnbIcalUrl}</code>}
+          {!airbnbIcalUrl && airbnbReservationUrl && <code className="airbnb-ical-url">{airbnbReservationUrl}</code>}
+          {!airbnbIcalUrl && airbnbReservationUrl && <small className="form-note">No hay un feed iCal configurado para la habitación; se encontró el enlace de la reserva en la descripción.</small>}
+          {!airbnbValidationUrl && <small className="form-note">No se encontró una URL iCal ni un enlace de reserva de Airbnb.</small>}
+          <div className="airbnb-guest-form">
+            <label htmlFor="airbnb-guest-name">Nombre del huésped</label>
+            <div className="mini-form inline-form">
+              <input id="airbnb-guest-name" value={airbnbGuestName} onChange={(event) => setAirbnbGuestName(event.target.value)} placeholder="Escribe el nombre real del huésped" />
+              <button className="primary" disabled={airbnbGuestSaving || !airbnbGuestName.trim()} onClick={saveAirbnbGuestName}>
+                <Save size={16} />{airbnbGuestSaving ? "Guardando..." : "Guardar nombre"}
+              </button>
+            </div>
+            {airbnbGuestMessage && <small className="form-note">{airbnbGuestMessage}</small>}
+          </div>
+        </div>
+      )}
 
       <div className="panel-section chips">
         <span className={reservation.airbnb_ok ? "chip ok" : "chip"}>AIRBNB</span>
@@ -3322,6 +3393,16 @@ function safeCalendarColor(value?: string) {
   return /^#[0-9a-f]{6}$/i.test(value || "") ? value || "#184B24" : "#184B24";
 }
 
+function formatListingMoney(value: unknown, currency = "USD") {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "Sin dato";
+  try {
+    return new Intl.NumberFormat("es-CO", { style: "currency", currency: currency.toUpperCase(), maximumFractionDigits: 2 }).format(amount);
+  } catch (_error) {
+    return `${currency} ${amount}`;
+  }
+}
+
 function RoomsView(props: { rooms: Room[]; reservations: Reservation[]; onSaved: () => void; onBlock: () => void }) {
   const [editing, setEditing] = useState<Room | null>(null);
   const [roomQuery, setRoomQuery] = useState("");
@@ -3654,6 +3735,11 @@ function AirbnbSyncView(props: { rooms: Room[]; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const listingRooms = useMemo(() => props.rooms.filter((room) => String(room.airbnb_listing_id || "").trim()), [props.rooms]);
+  const [detailsRoomId, setDetailsRoomId] = useState("");
+  const [listingDetails, setListingDetails] = useState<AirbnbListingDetailsResponse | null>(null);
+  const [detailsBusy, setDetailsBusy] = useState(false);
+  const [detailsError, setDetailsError] = useState("");
 
   const loadFeeds = async () => {
     setError("");
@@ -3673,6 +3759,27 @@ function AirbnbSyncView(props: { rooms: Room[]; onChanged: () => void }) {
       setForm((current) => ({ ...current, habitacion_id: String(props.rooms[0].id) }));
     }
   }, [props.rooms, form.habitacion_id]);
+
+  useEffect(() => {
+    if (!detailsRoomId && listingRooms.length) setDetailsRoomId(String(listingRooms[0].id));
+    if (detailsRoomId && !listingRooms.some((room) => String(room.id) === detailsRoomId)) {
+      setDetailsRoomId(listingRooms[0] ? String(listingRooms[0].id) : "");
+      setListingDetails(null);
+    }
+  }, [detailsRoomId, listingRooms]);
+
+  const extractListingDetails = async () => {
+    if (!detailsRoomId) return;
+    setDetailsBusy(true);
+    setDetailsError("");
+    try {
+      setListingDetails(await api.airbnbListingDetails(Number(detailsRoomId), { refresh: "1" }));
+    } catch (err) {
+      setDetailsError(err instanceof Error ? err.message : "No se pudo extraer la información del listing Airbnb.");
+    } finally {
+      setDetailsBusy(false);
+    }
+  };
 
   const save = async () => {
     if (!form.habitacion_id || !form.ical_url.trim()) {
@@ -3770,6 +3877,73 @@ function AirbnbSyncView(props: { rooms: Room[]; onChanged: () => void }) {
         <div className="modal-actions">
           <button className="primary" disabled={busy || !props.rooms.length} onClick={save}><Plus size={17} />Guardar enlace</button>
         </div>
+      </section>
+
+      <section className="work-panel">
+        <div className="panel-header">
+          <div>
+            <strong>Información del listing Airbnb</strong>
+            <small>Consulta el listing ID que ya está guardado en Habitaciones mediante Airbnb Scraper API.</small>
+          </div>
+        </div>
+        {listingRooms.length === 0 ? (
+          <p className="empty-copy">No hay habitaciones con ID listing Airbnb configurado.</p>
+        ) : (
+          <>
+            <div className="form-grid">
+              <label className="full">Listing existente
+                <select value={detailsRoomId} onChange={(event) => { setDetailsRoomId(event.target.value); setListingDetails(null); setDetailsError(""); }}>
+                  {listingRooms.map((room) => <option key={room.id} value={room.id}>{room.codigo_habitacion} - {room.nombre_habitacion} · {room.airbnb_listing_id}</option>)}
+                </select>
+              </label>
+            </div>
+            <div className="modal-actions">
+              <button className="primary" disabled={detailsBusy || !detailsRoomId} onClick={extractListingDetails}><RefreshCw size={16} />{detailsBusy ? "Extrayendo..." : "Extraer información"}</button>
+            </div>
+            {detailsError && <div className="notice error">{detailsError}</div>}
+            {listingDetails && (() => {
+              const listing = listingDetails.listing;
+              const pricing = listing.pricing || {};
+              const location = listing.location || listing.full_address || listing.city || "Sin ubicación";
+              const photos = Array.isArray(listing.photos) ? listing.photos : [];
+              return (
+                <div className="airbnb-listing-details">
+                  <div className="airbnb-listing-heading">
+                    <div>
+                      <h2>{listing.title || "Listing Airbnb"}</h2>
+                      <p>{listing.tagline || listing.property_type || ""}</p>
+                      <span>{location}</span>
+                    </div>
+                    <span className={`airbnb-availability ${listing.is_available === false ? "unavailable" : "available"}`}>
+                      {listing.is_available === false ? "No disponible" : "Disponible"}
+                    </span>
+                  </div>
+                  <div className="airbnb-listing-stats">
+                    <span><strong>{listing.overall_rating ?? "—"}</strong> rating</span>
+                    <span><strong>{listing.review_count ?? "—"}</strong> reseñas</span>
+                    <span><strong>{listing.guest_capacity ?? "—"}</strong> huéspedes</span>
+                    <span><strong>{formatListingMoney(pricing.nightly_rate ?? pricing.rate, pricing.currency || "USD")}</strong> por noche</span>
+                    <span><strong>{listing.host_name || "—"}</strong> anfitrión</span>
+                  </div>
+                  <div className="airbnb-listing-meta">
+                    <span>{listing.bedroom_count ?? "—"} habitaciones</span>
+                    <span>{listing.bathroom_count ?? "—"} baños</span>
+                    <span>{listing.bed_count ?? "—"} camas</span>
+                    <span>{listing.is_superhost ? "Superhost" : "Anfitrión estándar"}</span>
+                    <span>{listing.is_guest_favorite ? "Favorito de huéspedes" : ""}</span>
+                    {pricing.total != null && <span>Total mostrado: {formatListingMoney(pricing.total, pricing.currency || "USD")}</span>}
+                  </div>
+                  {listing.highlights?.length ? <p className="airbnb-listing-highlights"><strong>Destacados:</strong> {listing.highlights.join(" · ")}</p> : null}
+                  {photos.length > 0 && <div className="airbnb-listing-photos">{photos.slice(0, 5).map((photo) => <img key={photo} src={photo} alt="Foto del listing Airbnb" />)}</div>}
+                  <div className="airbnb-listing-footer">
+                    <span>Extraído: {listingDetails.fetched_at}{listingDetails.cached ? " · cache local" : ""}</span>
+                    {listing.listing_url && <a href={listing.listing_url} target="_blank" rel="noreferrer">Abrir en Airbnb</a>}
+                  </div>
+                </div>
+              );
+            })()}
+          </>
+        )}
       </section>
 
       <section className="work-panel">

@@ -175,6 +175,61 @@ export interface AirbnbFeed {
   nombre_habitacion: string;
 }
 
+export interface AirbnbListingData {
+  listing_id?: string;
+  title?: string;
+  tagline?: string;
+  property_type?: string;
+  listing_url?: string;
+  photos?: string[];
+  highlights?: string[];
+  location?: string;
+  city?: string;
+  full_address?: string;
+  latitude?: number;
+  longitude?: number;
+  guest_capacity?: number;
+  bedroom_count?: number;
+  bathroom_count?: number;
+  bed_count?: number;
+  host_name?: string;
+  host_id?: string | number;
+  host_avatar?: string;
+  is_superhost?: boolean;
+  is_verified?: boolean;
+  host_rating?: number;
+  host_review_count?: number;
+  years_hosting?: number;
+  overall_rating?: number;
+  review_count?: number;
+  is_guest_favorite?: boolean;
+  rating_categories?: { category?: string; score?: string | number }[];
+  pricing?: {
+    rate?: number;
+    nightly_rate?: number;
+    qualifier?: string;
+    currency?: string;
+    total?: number | null;
+    total_cost?: number | null;
+    priceItems?: { title?: string; amount?: number }[];
+    cost_breakdown?: { label?: string; amount?: number }[];
+  };
+  cancellation_policy?: string;
+  cancellation_terms?: string[];
+  is_available?: boolean;
+  unavailability_reason?: string | null;
+  [key: string]: unknown;
+}
+
+export interface AirbnbListingDetailsResponse {
+  room: Pick<Room, "id" | "codigo_habitacion" | "nombre_habitacion" | "airbnb_listing_id">;
+  listing: AirbnbListingData;
+  fetched_at: string;
+  last_error: string;
+  cached: boolean;
+  source: string;
+}
+
 export interface Dashboard {
   today: string;
   period_start: string;

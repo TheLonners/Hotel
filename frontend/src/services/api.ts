@@ -1,4 +1,4 @@
-import type { AirbnbFeed, Attachment, BackupRecord, BillingAccount, Block, CleaningEvidence, CleaningReport, Client, Dashboard, Payment, Reservation, Room, TodayOperations } from "./types";
+import type { AirbnbFeed, AirbnbListingDetailsResponse, Attachment, BackupRecord, BillingAccount, Block, CleaningEvidence, CleaningReport, Client, Dashboard, Payment, Reservation, Room, TodayOperations } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -46,6 +46,8 @@ export const api = {
   syncAirbnbFeed: (id: number) => request<Record<string, unknown>>(`/api/airbnb-sync/feeds/${id}/sync`, { method: "POST" }),
   syncDueAirbnbFeeds: () => request<{ results: Record<string, unknown>[] }>("/api/airbnb-sync/sync-due", { method: "POST" }),
   syncAllAirbnbFeeds: () => request<{ results: Record<string, unknown>[] }>("/api/airbnb-sync/sync-all", { method: "POST" }),
+  airbnbListingDetails: (roomId: number, params: Record<string, string> = {}) =>
+    request<AirbnbListingDetailsResponse>(`/api/airbnb/rooms/${roomId}/details?${new URLSearchParams(params)}`),
   previewAirbnbImport: (file: File) => {
     const form = new FormData();
     form.append("file", file);

@@ -547,6 +547,17 @@ function migrate() {
       FOREIGN KEY (block_id) REFERENCES blocks(id) ON DELETE SET NULL
     );
 
+    CREATE TABLE IF NOT EXISTS airbnb_listing_details (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      room_id INTEGER NOT NULL UNIQUE,
+      listing_id TEXT NOT NULL,
+      data_json TEXT NOT NULL DEFAULT '{}',
+      fetched_at TEXT,
+      last_error TEXT DEFAULT '',
+      fecha_actualizacion TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS room_cleaning_status (
       habitacion_id INTEGER PRIMARY KEY,
       estado TEXT NOT NULL DEFAULT 'sin limpiar',
@@ -589,6 +600,7 @@ function migrate() {
     CREATE INDEX IF NOT EXISTS idx_blocks_dates ON blocks(fecha_inicio, fecha_fin);
     CREATE INDEX IF NOT EXISTS idx_payments_reserva ON payments(reserva_id);
     CREATE INDEX IF NOT EXISTS idx_airbnb_sync_events_uid ON airbnb_sync_events(feed_id, uid);
+    CREATE INDEX IF NOT EXISTS idx_airbnb_listing_details_listing ON airbnb_listing_details(listing_id);
     CREATE INDEX IF NOT EXISTS idx_cleaning_history_date ON room_cleaning_history(fecha);
     CREATE INDEX IF NOT EXISTS idx_cleaning_evidence_room_date ON cleaning_evidence(habitacion_id, fecha);
     CREATE INDEX IF NOT EXISTS idx_guests_document ON guests(document_type, document_number);

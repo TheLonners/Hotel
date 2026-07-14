@@ -48,6 +48,20 @@ ADMIN_PASSWORD=
 
 La autenticacion esta desactivada temporalmente (`AUTH_ENABLED=false`). Cuando quieras activarla, cambia ese valor a `true`, define `ADMIN_PASSWORD` y reinicia el backend.
 
+## Extraer información de listings Airbnb
+
+La pantalla `Airbnb` conserva la sincronización iCal existente para reservas y bloqueos. Además, permite extraer la información enriquecida del listing guardado en cada habitación usando la API documentada en [omkarcloud/airbnb-scraper](https://github.com/omkarcloud/airbnb-scraper): título, fotos, ubicación, capacidad, anfitrión, ratings, precio y disponibilidad.
+
+Configura en `backend/.env` una API Key de omkar.cloud:
+
+```env
+AIRBNB_SCRAPER_API_URL=https://airbnb-scraper-api.omkar.cloud
+AIRBNB_SCRAPER_API_KEY=TU_API_KEY
+AIRBNB_SCRAPER_CURRENCY=USD
+```
+
+Luego reinicia el backend, abre `Airbnb`, selecciona un listing existente y pulsa `Extraer información`. La respuesta queda cacheada localmente para no consumir una solicitud cada vez que se abre la pantalla; el botón vuelve a consultar Airbnb Scraper y actualiza los datos.
+
 ## Crear base de datos y datos de ejemplo
 
 La base SQLite se crea automaticamente al iniciar el backend. Para cargar habitaciones y reservas de ejemplo:

@@ -45,6 +45,7 @@ const {
   updateAirbnbFeed
 } = require("./services/airbnbSync");
 const { importAirbnbNames, previewAirbnbImport } = require("./services/airbnbNameImport");
+const { getAirbnbListingDetails } = require("./services/airbnbDetails");
 const {
   exportBalances,
   exportPayments,
@@ -579,6 +580,10 @@ app.post("/api/airbnb-sync/sync-due", asyncRoute(async (_req, res) => {
 
 app.post("/api/airbnb-sync/sync-all", asyncRoute(async (_req, res) => {
   res.json({ results: await syncAllAirbnbFeeds() });
+}));
+
+app.get("/api/airbnb/rooms/:id/details", asyncRoute(async (req, res) => {
+  res.json(await getAirbnbListingDetails(Number(req.params.id), req.query));
 }));
 
 app.post("/api/airbnb-sync/import-names", memoryUpload.single("file"), asyncRoute(async (req, res) => {

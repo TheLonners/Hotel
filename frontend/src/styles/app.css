@@ -1507,6 +1507,92 @@ small {
   gap: 8px;
 }
 
+.airbnb-listing-details {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--brand-cream-2);
+}
+
+.airbnb-listing-heading,
+.airbnb-listing-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.airbnb-listing-heading h2 {
+  margin: 0;
+  color: var(--brand-green);
+  font-size: 20px;
+}
+
+.airbnb-listing-heading p,
+.airbnb-listing-heading span,
+.airbnb-listing-footer span,
+.airbnb-listing-footer a,
+.airbnb-listing-highlights {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.airbnb-listing-heading p,
+.airbnb-listing-heading span {
+  display: block;
+  margin: 4px 0 0;
+}
+
+.airbnb-availability {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: #fff !important;
+  background: var(--teal);
+}
+
+.airbnb-availability.unavailable {
+  background: var(--red);
+}
+
+.airbnb-listing-stats,
+.airbnb-listing-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.airbnb-listing-stats span,
+.airbnb-listing-meta span {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.airbnb-listing-stats strong {
+  color: var(--ink);
+}
+
+.airbnb-listing-photos {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.airbnb-listing-photos img {
+  width: 100%;
+  aspect-ratio: 1.2;
+  object-fit: cover;
+  border-radius: 6px;
+  background: #ddd;
+}
+
 .airbnb-name-list {
   display: grid;
   gap: 10px;
@@ -3597,6 +3683,77 @@ th {
   overflow-wrap: anywhere;
 }
 
+.reservation-detail-panel .airbnb-validation-section {
+  border-color: #bfe4d0;
+  background: linear-gradient(135deg, #f4fff8, #ffffff 58%, #f4fbff);
+}
+
+.airbnb-validation-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.airbnb-validation-heading h3 {
+  margin: 0;
+  color: #0c2340;
+}
+
+.airbnb-validation-heading small {
+  display: block;
+  margin-top: 4px;
+  color: #506071;
+}
+
+.airbnb-ical-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-height: 36px;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid #0b8f59;
+  border-radius: 8px;
+  color: #087447;
+  background: #ffffff;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.airbnb-ical-button:hover {
+  color: #ffffff;
+  background: #078b55;
+}
+
+.airbnb-ical-url {
+  display: block;
+  max-width: 100%;
+  margin-top: 12px;
+  padding: 9px 10px;
+  overflow-wrap: anywhere;
+  border: 1px solid #d7e8de;
+  border-radius: 7px;
+  color: #31566d;
+  background: #ffffff;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.airbnb-guest-form {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #d7e8de;
+}
+
+.airbnb-guest-form > label {
+  display: block;
+  margin-bottom: 7px;
+  color: #27435b;
+  font-weight: 800;
+}
+
 .reservation-detail-panel .panel-actions {
   position: sticky;
   bottom: 0;
@@ -5571,6 +5728,14 @@ th {
     width: 100vw;
   }
 
+  .airbnb-validation-heading {
+    flex-direction: column;
+  }
+
+  .airbnb-ical-button {
+    width: 100%;
+  }
+
   .app-shell.dashboard-mode .desktop-layout {
     padding: 0;
   }
@@ -6149,6 +6314,10 @@ th {
 
 @media (max-width: 820px) {
   /* Limpieza móvil: listado y detalle comparten una escala compacta. */
+  .app-shell.cleaning-mode .desktop-cleaning-workspace {
+    display: none !important;
+  }
+
   .app-shell.cleaning-mode .mobile-cleaning-reference {
     display: grid;
     gap: 14px;
@@ -6159,6 +6328,7 @@ th {
 
   .app-shell.cleaning-mode .mobile-cleaning-top {
     display: grid;
+    grid-template-columns: minmax(0,1fr);
     gap: 12px;
     padding: 0;
   }
@@ -6380,7 +6550,6 @@ th {
   .app-shell.cleaning-mode .mobile-cleaning-detail footer button:first-child svg { display: inline-block; }
   .app-shell.cleaning-mode .mobile-cleaning-detail footer button:first-child::after { content: none; }
   .app-shell.cleaning-mode .mobile-cleaning-detail footer .primary { order: initial; }
-}
   body.mobile-menu-open {
     overflow: hidden;
   }
