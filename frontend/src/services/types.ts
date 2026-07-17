@@ -17,6 +17,7 @@ export interface Room {
   precio_base_noche: number;
   estado: RoomStatus;
   color_calendario: string;
+  foto_url: string;
   pendiente_revision: number;
   airbnb_listing_id: string;
   airbnb_ical_url: string;
@@ -60,6 +61,33 @@ export interface Attachment {
   nota: string;
 }
 
+export interface BackupRecord {
+  id: number;
+  kind: string;
+  status: string;
+  file_name: string;
+  file_path: string;
+  sha256: string;
+  size_bytes: number;
+  protected: number;
+  created_at: string;
+}
+
+export interface Client {
+  id: number;
+  cedula: string;
+  primer_nombre: string;
+  segundo_nombre: string;
+  primer_apellido: string;
+  segundo_apellido: string;
+  nombre_completo: string;
+  correo: string;
+  telefono: string;
+  direccion: string;
+  fecha_creacion: string;
+  fecha_actualizacion: string;
+}
+
 export interface AlertItem {
   id: number;
   reserva_id?: number;
@@ -96,6 +124,7 @@ export interface Reservation {
   banco_o_medio_pago: string;
   metodo_pago: string;
   estado_reserva: string;
+  llegada_verificada: number | boolean;
   estado_pago: string;
   origen_reserva: string;
   airbnb_ok: boolean;
@@ -144,6 +173,61 @@ export interface AirbnbFeed {
   fecha_actualizacion: string;
   codigo_habitacion: string;
   nombre_habitacion: string;
+}
+
+export interface AirbnbListingData {
+  listing_id?: string;
+  title?: string;
+  tagline?: string;
+  property_type?: string;
+  listing_url?: string;
+  photos?: string[];
+  highlights?: string[];
+  location?: string;
+  city?: string;
+  full_address?: string;
+  latitude?: number;
+  longitude?: number;
+  guest_capacity?: number;
+  bedroom_count?: number;
+  bathroom_count?: number;
+  bed_count?: number;
+  host_name?: string;
+  host_id?: string | number;
+  host_avatar?: string;
+  is_superhost?: boolean;
+  is_verified?: boolean;
+  host_rating?: number;
+  host_review_count?: number;
+  years_hosting?: number;
+  overall_rating?: number;
+  review_count?: number;
+  is_guest_favorite?: boolean;
+  rating_categories?: { category?: string; score?: string | number }[];
+  pricing?: {
+    rate?: number;
+    nightly_rate?: number;
+    qualifier?: string;
+    currency?: string;
+    total?: number | null;
+    total_cost?: number | null;
+    priceItems?: { title?: string; amount?: number }[];
+    cost_breakdown?: { label?: string; amount?: number }[];
+  };
+  cancellation_policy?: string;
+  cancellation_terms?: string[];
+  is_available?: boolean;
+  unavailability_reason?: string | null;
+  [key: string]: unknown;
+}
+
+export interface AirbnbListingDetailsResponse {
+  room: Pick<Room, "id" | "codigo_habitacion" | "nombre_habitacion" | "airbnb_listing_id">;
+  listing: AirbnbListingData;
+  fetched_at: string;
+  last_error: string;
+  cached: boolean;
+  source: string;
 }
 
 export interface Dashboard {
@@ -234,6 +318,17 @@ export interface CleaningReport {
     codigo_habitacion: string;
     nombre_habitacion: string;
   }>;
+}
+
+export interface CleaningEvidence {
+  id: number;
+  habitacion_id: number;
+  fecha: string;
+  nombre_archivo: string;
+  ruta_archivo: string;
+  tipo_archivo: string;
+  nota: string;
+  fecha_subida: string;
 }
 
 export interface BillingItem {

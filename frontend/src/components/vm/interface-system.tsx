@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, ChevronRight, Hotel, LayoutDashboard, Menu, Plus, Search, Settings, Sparkles, Users } from "lucide-react";
+import { CalendarDays, ChevronRight, Hotel, LayoutDashboard, Menu, Plus, Search, Settings, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";

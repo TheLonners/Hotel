@@ -6,6 +6,7 @@ const {
   createReservation,
   getReservation,
   getRoomById,
+  recalculateReservationPayments,
   updateReservation,
   validateRoomIcalUrl
 } = require("./reservations");
@@ -13,6 +14,22 @@ const { compareDates, diffNights, parseDateValue, toISODate } = require("./dates
 
 function cleanText(value) {
   return String(value || "").trim();
+}
+
+function isAirbnbPlaceholderGuestName(value) {
+  const name = cleanText(value);
+  return !name || /^airbnb(?:\s|$)/i.test(name) || /^(reserved|not available|unavailable|blocked)$/i.test(name);
+}
+
+function preserveKnownGuestName(existingReservation, payload) {
+  if (!existingReservation || !isAirbnbPlaceholderGuestName(payload.nombre_completo_huesped)) return payload;
+  if (isAirbnbPlaceholderGuestName(existingReservation.nombre_completo_huesped)) return payload;
+  return {
+    ...payload,
+    nombre_completo_huesped: existingReservation.nombre_completo_huesped,
+    nombre_huesped: existingReservation.nombre_huesped || "",
+    apellido_huesped: existingReservation.apellido_huesped || ""
+  };
 }
 
 function unfoldIcs(text) {
@@ -171,6 +188,49 @@ function roomStatusText({ created = 0, updated = 0, blocked = 0, cancelled = 0, 
   return `OK: ${created} creadas, ${updated} actualizadas, ${blocked} bloqueos, ${cancelled} canceladas, ${skipped} omitidas`;
 }
 
+function settleAirbnbReservation(reservation, paymentDate = "") {
+  const total = Number(reservation?.total_pago || 0);
+  if (!reservation?.id || !Number.isFinite(total) || total <= 0) {
+    return reservation?.id ? recalculateReservationPayments(reservation.id) : reservation;
+  }
+
+  const reference = `AIRBNB-${cleanText(reservation.numero_remision).replace(/^AIRBNB-/i, "") || reservation.id}`;
+  const existing = db.prepare(`
+    SELECT id FROM payments
+    WHERE reserva_id = ? AND referencia_pago = ?
+    LIMIT 1
+  `).get(reservation.id, reference);
+  const otherPaid = Number(db.prepare(`
+    SELECT COALESCE(SUM(monto), 0) AS total
+    FROM payments
+    WHERE reserva_id = ? AND (referencia_pago IS NULL OR referencia_pago <> ?)
+  `).get(reservation.id, reference)?.total || 0);
+  const amount = Math.max(total - otherPaid, 0);
+  if (existing) {
+    db.prepare(`
+      UPDATE payments
+      SET monto = ?, fecha_pago = ?, metodo_pago = 'airbnb', banco_o_medio = 'Airbnb',
+          nota = ?
+      WHERE id = ?
+    `).run(amount, paymentDate || reservation.fecha_ingreso || "", "Reserva Airbnb pagada totalmente por Airbnb. No requiere comprobante.", existing.id);
+  } else if (amount > 0) {
+    db.prepare(`
+      INSERT INTO payments (reserva_id, monto, fecha_pago, metodo_pago, banco_o_medio, referencia_pago, nota)
+      VALUES (?, ?, ?, 'airbnb', 'Airbnb', ?, ?)
+    `).run(reservation.id, amount, paymentDate || reservation.fecha_ingreso || "", reference, "Reserva Airbnb pagada totalmente por Airbnb. No requiere comprobante.");
+  }
+  return recalculateReservationPayments(reservation.id);
+}
+
+function settleAllAirbnbReservations() {
+  const reservations = db.prepare(`
+    SELECT * FROM reservations
+    WHERE origen_reserva = 'airbnb' AND total_pago > 0
+  `).all();
+  reservations.forEach((reservation) => settleAirbnbReservation(reservation));
+  return reservations.length;
+}
+
 function createAirbnbFeed(input) {
   const roomId = Number(input.habitacion_id || input.roomId);
   const room = getRoomById(roomId);
@@ -278,6 +338,24 @@ function eventReservationPayload(feed, event) {
     roomIds: [feed.habitacion_id],
     total_manual: 0
   };
+}
+
+function findAirbnbReservationByReference(feed, payload) {
+  const reference = cleanText(payload?.numero_remision);
+  if (!reference) return null;
+
+  const reservation = db.prepare(`
+    SELECT r.id
+    FROM reservations r
+    JOIN reservation_rooms rr ON rr.reserva_id = r.id
+    WHERE rr.habitacion_id = @roomId
+      AND lower(coalesce(r.origen_reserva, '')) = 'airbnb'
+      AND lower(trim(coalesce(r.numero_remision, ''))) = lower(@reference)
+    ORDER BY r.id DESC
+    LIMIT 1
+  `).get({ roomId: feed.habitacion_id, reference });
+
+  return reservation ? getReservation(reservation.id) : null;
 }
 
 function upsertUnavailableBlock(feed, event, existingEvent) {
@@ -403,8 +481,13 @@ async function syncAirbnbFeed(id) {
 
         const payload = eventReservationPayload(feed, event);
         let reservation;
-        if (existingEvent?.reserva_id && getReservation(existingEvent.reserva_id)) {
-          reservation = updateReservation(existingEvent.reserva_id, payload);
+        // Airbnb can regenerate an iCal event UID for the same confirmation
+        // code. Prefer that stable code over a stale UID mapping so we update
+        // the existing reservation instead of treating it as an overlap.
+        const existingReservation = findAirbnbReservationByReference(feed, payload)
+          || (existingEvent?.reserva_id ? getReservation(existingEvent.reserva_id) : null);
+        if (existingReservation) {
+          reservation = updateReservation(existingReservation.id, preserveKnownGuestName(existingReservation, payload));
           updated += 1;
         } else {
           if (existingEvent?.block_id) {
@@ -413,6 +496,10 @@ async function syncAirbnbFeed(id) {
           reservation = createReservation(payload);
           created += 1;
         }
+
+        // Airbnb collects the full amount on its platform. Keep iCal-created
+        // reservations out of the pending-balance workflow.
+        reservation = settleAirbnbReservation(reservation);
 
         db.prepare(`
           INSERT INTO airbnb_sync_events (feed_id, uid, reserva_id, block_id, summary, fecha_ingreso, fecha_salida, last_seen_at)
@@ -517,6 +604,21 @@ async function syncDueAirbnbFeeds() {
       )
   `).all();
   const results = [];
+  settleAllAirbnbReservations();
+  for (const feed of feeds) {
+    try {
+      results.push(await syncAirbnbFeed(feed.id));
+    } catch (error) {
+      results.push({ feedId: feed.id, status: "error", error: error.message });
+    }
+  }
+  return results;
+}
+
+async function syncAllAirbnbFeeds() {
+  const feeds = db.prepare("SELECT id FROM airbnb_sync_feeds WHERE activo = 1 ORDER BY id").all();
+  const results = [];
+  settleAllAirbnbReservations();
   for (const feed of feeds) {
     try {
       results.push(await syncAirbnbFeed(feed.id));
@@ -530,11 +632,14 @@ async function syncDueAirbnbFeeds() {
 module.exports = {
   createAirbnbFeed,
   deleteAirbnbFeed,
-  getAirbnbFeed,
   listAirbnbFeeds,
-  parseIcsCalendar,
+  preserveKnownGuestName,
+  isAirbnbPlaceholderGuestName,
+  syncAllAirbnbFeeds,
   syncAirbnbFeed,
   syncDueAirbnbFeeds,
+  settleAirbnbReservation,
+  settleAllAirbnbReservations,
   testRoomIcalLink,
   updateAirbnbFeed
 };

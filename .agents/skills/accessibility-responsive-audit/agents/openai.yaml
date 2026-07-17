@@ -1,0 +1,4 @@
+interface:
+  display_name: "Accessibility and responsive audit"
+  short_description: "Improve accessibility and mobile usability"
+  default_prompt: "Use $accessibility-responsive-audit to audit responsive UX and accessibility."

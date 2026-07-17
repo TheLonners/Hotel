@@ -1,0 +1,4 @@
+interface:
+  display_name: "Security audit"
+  short_description: "Audit auth, inputs, APIs, and SQLite safety"
+  default_prompt: "Use $security-audit to audit this app for security risks."

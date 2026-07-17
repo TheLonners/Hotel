@@ -1,0 +1,4 @@
+interface:
+  display_name: "Web app audit"
+  short_description: "Audit architecture and critical hotel workflows"
+  default_prompt: "Use $webapp-audit to audit this hotel web app before changing code."

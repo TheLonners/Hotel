@@ -10,7 +10,16 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "seed": "node src/database/seed.js"
+    "seed": "node src/database/seed.js",
+    "backup": "node src/scripts/backup.js",
+    "test:integrity": "node src/scripts/verify-reservation-integrity.js",
+    "db:check": "node src/scripts/db-check.js",
+    "db:backup": "node src/scripts/backup.js",
+    "db:restore": "node src/scripts/db-restore.js",
+    "db:test-restore": "node src/scripts/db-test-restore.js",
+    "db:maintenance": "node src/scripts/db-maintenance.js",
+    "db:concurrency": "node src/scripts/test-reservation-concurrency.js",
+    "db:migrate": "node src/scripts/migrate.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

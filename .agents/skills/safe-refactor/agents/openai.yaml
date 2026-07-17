@@ -1,0 +1,4 @@
+interface:
+  display_name: "Safe refactor"
+  short_description: "Control phased low-risk refactoring"
+  default_prompt: "Use $safe-refactor to plan and apply a safe phased refactor."

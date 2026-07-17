@@ -6,7 +6,7 @@ Aplicacion web local para gestionar reservas hoteleras con calendario tipo Airbn
 
 ```text
 backend/   API Express, SQLite, importador, exportador y uploads
-frontend/  React + Vite + TypeScript
+frontend/  Next.js + React + TypeScript
 ```
 
 ## Requisitos
@@ -15,7 +15,7 @@ frontend/  React + Vite + TypeScript
 - pnpm o npm.
 - Un computador servidor encendido dentro de la red local.
 
-La aplicacion no usa servicios cloud obligatorios. La base de datos queda en `backend/data/hotel.sqlite` y los comprobantes en `backend/uploads`.
+La aplicacion no usa servicios cloud obligatorios. Por defecto la base de datos queda en `data/hotel.sqlite` y los comprobantes en `uploads`.
 
 ## Instalacion
 
@@ -42,10 +42,25 @@ HOST=0.0.0.0
 DATABASE_PATH=./data/hotel.sqlite
 UPLOADS_DIR=./uploads
 CORS_ORIGIN=*
+AUTH_ENABLED=false
 ADMIN_PASSWORD=
 ```
 
-`ADMIN_PASSWORD` es opcional. Si lo defines, el frontend permite guardar esa clave desde el boton `Clave` y la enviara en cada llamada API.
+La autenticacion esta desactivada temporalmente (`AUTH_ENABLED=false`). Cuando quieras activarla, cambia ese valor a `true`, define `ADMIN_PASSWORD` y reinicia el backend.
+
+## Extraer información de listings Airbnb
+
+La pantalla `Airbnb` conserva la sincronización iCal existente para reservas y bloqueos. Además, permite extraer la información enriquecida del listing guardado en cada habitación usando la API documentada en [omkarcloud/airbnb-scraper](https://github.com/omkarcloud/airbnb-scraper): título, fotos, ubicación, capacidad, anfitrión, ratings, precio y disponibilidad.
+
+Configura en `backend/.env` una API Key de omkar.cloud:
+
+```env
+AIRBNB_SCRAPER_API_URL=https://airbnb-scraper-api.omkar.cloud
+AIRBNB_SCRAPER_API_KEY=TU_API_KEY
+AIRBNB_SCRAPER_CURRENCY=USD
+```
+
+Luego reinicia el backend, abre `Airbnb`, selecciona un listing existente y pulsa `Extraer información`. La respuesta queda cacheada localmente para no consumir una solicitud cada vez que se abre la pantalla; el botón vuelve a consultar Airbnb Scraper y actualiza los datos.
 
 ## Crear base de datos y datos de ejemplo
 
@@ -78,7 +93,7 @@ Abre:
 
 ## Ejecutar para uso local en un solo puerto
 
-Construye el frontend y deja que Express lo sirva:
+Construye el frontend como sitio estatico de Next.js y deja que Express lo sirva desde `frontend/out`:
 
 ```bash
 pnpm build
@@ -97,6 +112,18 @@ ipconfig
 ```
 
 Busca la IPv4 de la red Wi-Fi o Ethernet.
+
+## Validar cambios tecnicos
+
+Antes de publicar cambios importantes ejecuta:
+
+```bash
+pnpm typecheck
+pnpm build
+pnpm start
+```
+
+`pnpm typecheck` valida TypeScript sin depender de archivos generados en `.next`. `pnpm build` genera el frontend estatico en `frontend/out`.
 
 ## Importar el Excel actual
 
@@ -156,7 +183,7 @@ La exportacion de reservas respeta busqueda y filtros activos.
 Los comprobantes se suben desde el panel lateral de una reserva. Se aceptan imagenes y PDF. Los archivos quedan localmente en:
 
 ```text
-backend/uploads
+uploads
 ```
 
 ## Red local y acceso remoto opcional
@@ -177,7 +204,7 @@ Para acceso remoto puedes exponer ese mismo puerto con una herramienta externa:
 - ngrok: ejecuta `ngrok http 3000` y abre la URL generada.
 - VPN propia: entra a la VPN y usa la IP interna del servidor.
 
-Si expones la app fuera de la red local, configura `ADMIN_PASSWORD`.
+Si expones la app fuera de la red local, activa la autenticacion con `AUTH_ENABLED=true` y configura `ADMIN_PASSWORD`.
 
 ## Funciones incluidas en el MVP
 
