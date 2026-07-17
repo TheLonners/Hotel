@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertCircle,
   BadgeCheck,
@@ -60,6 +60,11 @@ import { api, type ImportPreview, type RoomImportPreview } from "./services/api"
 import type { AirbnbFeed, AirbnbListingDetailsResponse, Attachment, BillingAccount, Block, CleaningEvidence, CleaningReport, CleaningRoom, Dashboard, OperationRow, Reservation, Room, TodayOperations } from "./services/types";
 
 type View = "today" | "calendar" | "cleaning" | "dashboard" | "rooms" | "airbnb" | "airbnbReservations" | "import" | "billing";
+
+function hasRoomWaterAmenity(value?: string) {
+  const normalizedValue = String(value || "").trim().toLocaleLowerCase("es-CO");
+  return Boolean(normalizedValue) && !["no", "false", "0", "n/a", "na"].includes(normalizedValue);
+}
 
 type AirbnbImportPreview = {
   nombre_archivo: string;
@@ -589,13 +594,22 @@ function CalendarView(props: {
     return roomFiltered.filter((room) => roomIds.has(room.id));
   }, [hasActiveReservationFilters, props.roomSearch, props.rooms, props.reservations]);
   const dayWidth = 76;
-  const roomListRef = useRef<HTMLDivElement | null>(null);
   const calendarScrollRef = useRef<HTMLDivElement | null>(null);
-  const syncingScrollRef = useRef(false);
   const calendarScrollAnchorRef = useRef<{ date: string; offset: number } | null>(null);
   const requestedCalendarMonthRef = useRef<string | null>(null);
   const ignoreInitialCalendarScrollRef = useRef(true);
   const suppressCalendarExtensionRef = useRef(false);
+  const calendarDayHeader = useMemo(() => {
+    const monthFormatter = new Intl.DateTimeFormat("es-CO", { month: "short", timeZone: "UTC" });
+    const weekdayFormatter = new Intl.DateTimeFormat("es-CO", { weekday: "short", timeZone: "UTC" });
+    return days.map((day) => (
+      <div className={`date-cell ${day === today ? "today" : ""}`} key={day}>
+        <small>{monthFormatter.format(parseDate(day)).replace(".", "")}</small>
+        <span>{weekdayFormatter.format(parseDate(day))}</span>
+        <strong>{day.slice(8)}</strong>
+      </div>
+    ));
+  }, [days]);
   const calendarRangeLabel = `${days[0]} -> ${days[days.length - 1]}`;
   const lastAirbnbSyncAt = useMemo(() => getLatestAirbnbSyncAt(props.rooms), [props.rooms]);
   const activeReservations = props.reservations.filter((reservation) => reservation.estado_reserva !== "cancelada");
@@ -610,6 +624,9 @@ function CalendarView(props: {
   const setReservationFilter = (key: string, value: string) => {
     props.setFilters({ ...props.filters, [key]: props.filters[key] === value ? "" : value });
   };
+  const handleEmptyCalendarCell = useCallback((room: Room, date: string, rect: DOMRect) => {
+    setCellMenu({ room, date, x: rect.left, y: rect.top });
+  }, []);
 
   const scrollToDate = (date: string) => {
     const index = days.indexOf(date);
@@ -631,8 +648,9 @@ function CalendarView(props: {
 
   useEffect(() => {
     const scrollElement = calendarScrollRef.current;
+    if (!scrollElement) return;
     const anchor = calendarScrollAnchorRef.current;
-    if (scrollElement && anchor) {
+    if (anchor) {
       const index = days.indexOf(anchor.date);
       if (index >= 0) {
         scrollElement.scrollLeft = index * dayWidth + anchor.offset;
@@ -644,11 +662,9 @@ function CalendarView(props: {
 
     requestedCalendarMonthRef.current = null;
     ignoreInitialCalendarScrollRef.current = true;
-    if (props.month === currentMonth) {
-      window.setTimeout(() => scrollToDate(today), 80);
-    } else if (scrollElement) {
-      scrollElement.scrollLeft = 0;
-    }
+    const targetDate = props.month === currentMonth ? today : `${props.month}-01`;
+    const timer = window.setTimeout(() => scrollToDate(targetDate), 80);
+    return () => window.clearTimeout(timer);
   }, [props.month, days.join("|")]);
 
   const extendCalendar = (direction: -1 | 1) => {
@@ -668,7 +684,6 @@ function CalendarView(props: {
   };
 
   const handleCalendarScroll = () => {
-    syncVerticalScroll("calendar");
     if (suppressCalendarExtensionRef.current) return;
     if (ignoreInitialCalendarScrollRef.current) {
       ignoreInitialCalendarScrollRef.current = false;
@@ -683,20 +698,6 @@ function CalendarView(props: {
     } else if (scrollElement.scrollLeft + scrollElement.clientWidth >= scrollElement.scrollWidth - threshold) {
       extendCalendar(1);
     }
-  };
-
-  const syncVerticalScroll = (source: "rooms" | "calendar") => {
-    if (syncingScrollRef.current) {
-      syncingScrollRef.current = false;
-      return;
-    }
-
-    const sourceElement = source === "rooms" ? roomListRef.current : calendarScrollRef.current;
-    const targetElement = source === "rooms" ? calendarScrollRef.current : roomListRef.current;
-    if (!sourceElement || !targetElement || targetElement.scrollTop === sourceElement.scrollTop) return;
-
-    syncingScrollRef.current = true;
-    targetElement.scrollTop = sourceElement.scrollTop;
   };
 
   return (
@@ -759,19 +760,11 @@ function CalendarView(props: {
 
       <div className={`calendar-stage-grid ${sidePanelCollapsed ? "side-panel-hidden" : ""}`}>
       <div className="calendar-shell">
+        <div className="calendar-scroll" ref={calendarScrollRef} onScroll={handleCalendarScroll}>
+        <div className="calendar-unified-grid">
         <div className="room-column">
           <div className="room-header">{visibleRooms.length} habitaciones</div>
-          <div
-            className="room-list"
-            ref={roomListRef}
-            onScroll={() => syncVerticalScroll("rooms")}
-            onWheel={(event) => {
-              if (!calendarScrollRef.current) return;
-              event.preventDefault();
-              calendarScrollRef.current.scrollTop += event.deltaY;
-              calendarScrollRef.current.scrollLeft += event.deltaX;
-            }}
-          >
+          <div className="room-list">
           {visibleRooms.length === 0 && (
             <div className="empty-room-list">
               {props.rooms.length === 0 ? "No hay habitaciones registradas." : "No hay habitaciones con resultados para este filtro."}
@@ -779,8 +772,28 @@ function CalendarView(props: {
           )}
             {visibleRooms.map((room) => (
               <div className={`room-cell ${room.estado === "inactiva" ? "disabled-room" : ""}`} key={room.id}>
+                {(hasRoomWaterAmenity(room.tina) || hasRoomWaterAmenity(room.jacuzzi_interno)) && (
+                  <span className="room-water-amenities">
+                    {hasRoomWaterAmenity(room.tina) && (
+                      <span className="room-water-amenity" role="img" aria-label="Tina" data-tooltip="Tina" title="Tina">
+                        <img src="/icons/amenities/bathtub.svg" alt="" />
+                      </span>
+                    )}
+                    {hasRoomWaterAmenity(room.jacuzzi_interno) && (
+                      <span className="room-water-amenity" role="img" aria-label="Jacuzzi" data-tooltip="Jacuzzi" title="Jacuzzi">
+                        <img src="/icons/amenities/jacuzzi.svg" alt="" />
+                      </span>
+                    )}
+                  </span>
+                )}
                 {room.foto_url ? (
-                  <img className="calendar-room-photo" src={room.foto_url} alt={`Habitación ${room.codigo_habitacion}`} />
+                  <img
+                    className="calendar-room-photo"
+                    src={room.foto_url}
+                    alt={`Habitación ${room.codigo_habitacion}`}
+                    loading="lazy"
+                    decoding="async"
+                  />
                 ) : (
                   <span className="room-dot" style={{ background: room.color_calendario }} />
                 )}
@@ -793,16 +806,9 @@ function CalendarView(props: {
             <div className="calendar-bottom-spacer" />
           </div>
         </div>
-        <div className="calendar-scroll" ref={calendarScrollRef} onScroll={handleCalendarScroll}>
-          <div className="date-grid" style={{ width: days.length * dayWidth }}>
+        <div className="date-grid" style={{ width: days.length * dayWidth }}>
             <div className="date-header">
-              {days.map((day) => (
-                <div className={`date-cell ${day === today ? "today" : ""}`} key={day}>
-                  <small>{new Intl.DateTimeFormat("es-CO", { month: "short", timeZone: "UTC" }).format(parseDate(day)).replace(".", "")}</small>
-                  <span>{new Intl.DateTimeFormat("es-CO", { weekday: "short", timeZone: "UTC" }).format(parseDate(day))}</span>
-                  <strong>{day.slice(8)}</strong>
-                </div>
-              ))}
+              {calendarDayHeader}
             </div>
             {visibleRooms.map((room) => (
               <CalendarRoomRow
@@ -814,7 +820,7 @@ function CalendarView(props: {
                 blocks={props.blocks}
                 onSelect={props.onSelect}
                 onBlockSelect={props.onBlockSelect}
-                onEmptyCell={(room, date, rect) => setCellMenu({ room, date, x: rect.left, y: rect.top })}
+                onEmptyCell={handleEmptyCalendarCell}
               />
             ))}
             <div className="calendar-bottom-spacer" />
@@ -823,7 +829,8 @@ function CalendarView(props: {
                 {props.rooms.length === 0 ? "Crea habitaciones o importa tu Excel para ver disponibilidad en el calendario." : "Ajusta los filtros para volver a ver habitaciones."}
               </div>
             )}
-          </div>
+        </div>
+        </div>
         </div>
       </div>
         <aside className={`calendar-side-panel ${sidePanelCollapsed ? "collapsed" : ""}`}>
@@ -893,7 +900,7 @@ function CalendarView(props: {
             {staysToday.map((reservation) => (
               <button className="calendar-mini-row" key={reservation.id} onClick={() => props.onSelect(reservation)}>
                 <span>{reservation.nombre_completo_huesped.slice(0, 1) || "V"}</span>
-                <div><strong>{reservation.nombre_completo_huesped}</strong><small>{roomLabel(reservation)} Â· {channelLabel(reservation.origen_reserva)}</small></div>
+                <div><strong>{reservation.nombre_completo_huesped}</strong><small>{roomLabel(reservation)} · {channelLabel(reservation.origen_reserva)}</small></div>
                 <b>{formatMoney(reservation.total_pago)}</b>
               </button>
             ))}
@@ -982,7 +989,7 @@ function CheckinsDetailPanel(props: { reservations: Reservation[]; onClose: () =
   );
 }
 
-function CalendarRoomRow(props: {
+const CalendarRoomRow = memo(function CalendarRoomRow(props: {
   room: Room;
   days: string[];
   dayWidth: number;
@@ -1038,7 +1045,7 @@ function CalendarRoomRow(props: {
               ? `${props.room.codigo_habitacion}, ${day}: no disponible`
               : hasAirbnbBlock
                 ? `${props.room.codigo_habitacion}, ${day}: Airbnb bloqueado; crear reserva directa`
-              : `Crear reserva o bloqueo en ${props.room.codigo_habitacion} para ${day}`}
+                : `Crear reserva o bloqueo en ${props.room.codigo_habitacion} para ${day}`}
             title={busy ? "" : hasAirbnbBlock ? "Airbnb bloqueado; crear reserva directa" : `Crear accion en ${props.room.codigo_habitacion} - ${day}`}
             onClick={(event) => props.onEmptyCell(props.room, day, event.currentTarget.getBoundingClientRect())}
           />
@@ -1072,7 +1079,6 @@ function CalendarRoomRow(props: {
             key={`${reservation.id}-${props.room.id}`}
             style={{ left: style.left, width: style.width }}
             onClick={() => props.onSelect(reservation)}
-            data-tooltip={`${reservation.nombre_completo_huesped || "Sin huésped"} · ${reservation.numero_interno || reservation.numero_remision || `Reserva #${reservation.id}`}`}
             title={`${reservation.nombre_completo_huesped || "Sin huésped"} · ${formatMoney(reservation.total_pago)} · saldo ${formatMoney(reservation.saldo)}`}
             aria-label={`${reservation.nombre_completo_huesped || "Sin huésped"}. ${roomLabel(reservation)}. ${reservation.numero_remision || `Reserva ${reservation.id}`}`}
           >
@@ -1088,7 +1094,7 @@ function CalendarRoomRow(props: {
       })}
     </div>
   );
-}
+});
 
 function DetailPanel(props: { reservation: Reservation; onClose: () => void; onEdit: () => void; onChanged: () => void; onNotify: (text: string, tone?: "success" | "error" | "") => void }) {
   const [payment, setPayment] = useState({ monto: "", fecha_pago: today, metodo_pago: "transferencia", banco_o_medio: "", referencia_pago: "", nota: "" });
@@ -1334,7 +1340,7 @@ function DetailPanel(props: { reservation: Reservation; onClose: () => void; onE
         ))}
         <div className="reservation-receipt-dropzone">
           <Upload size={33} />
-          <div><span>Arrastra archivos aquí o</span><label><Paperclip size={16} />Adjuntar<input type="file" accept="image/*,application/pdf" onChange={(event) => setFile(event.target.files?.[0] || null)} /></label><small>PDF, JPG o PNG Â· Máx. 10 MB</small></div>
+          <div><span>Arrastra archivos aquí o</span><label><Paperclip size={16} />Adjuntar<input aria-label="Seleccionar comprobante" type="file" accept="image/*,application/pdf" onChange={(event) => setFile(event.target.files?.[0] || null)} /></label><small>PDF, JPG o PNG · Máx. 10 MB</small></div>
         </div>
         {file && <div className="reservation-receipt-upload"><input placeholder="Nota del comprobante" value={uploadNote} onChange={(event) => setUploadNote(event.target.value)} /><button className="primary" disabled={busy} onClick={uploadAttachment}><Upload size={16} />Guardar comprobante</button></div>}
       </section>
@@ -1368,14 +1374,60 @@ function ReservationModal(props: {
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const backdropRef = useRef<HTMLDivElement | null>(null);
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const initialFocusRef = useRef<HTMLInputElement | null>(null);
+  const savingRef = useRef(saving);
+  const onCloseRef = useRef(props.onClose);
+  savingRef.current = saving;
+  onCloseRef.current = props.onClose;
 
   useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !saving) props.onClose();
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const shell = backdropRef.current?.closest(".app-shell");
+    const hiddenSiblings = shell
+      ? Array.from(shell.children).filter((element) => element !== backdropRef.current)
+      : [];
+    hiddenSiblings.forEach((element) => {
+      element.setAttribute("inert", "");
+      element.setAttribute("aria-hidden", "true");
+    });
+    const focusTimer = window.setTimeout(() => initialFocusRef.current?.focus(), 0);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !savingRef.current) {
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+      )).filter((element) => !element.hasAttribute("hidden") && element.getClientRects().length > 0);
+      if (!focusable.length) {
+        event.preventDefault();
+        dialogRef.current.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [props.onClose, saving]);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener("keydown", handleKeyDown);
+      hiddenSiblings.forEach((element) => {
+        element.removeAttribute("inert");
+        element.removeAttribute("aria-hidden");
+      });
+      previouslyFocused?.focus();
+    };
+  }, []);
 
   useEffect(() => {
     const start = String(form.fecha_ingreso || "");
@@ -1507,8 +1559,8 @@ function ReservationModal(props: {
   const isEditing = Boolean(props.reservation);
 
   return (
-    <div className="modal-backdrop">
-      <section className="modal wide-modal reservation-modal reservation-create-modal" role="dialog" aria-modal="true" aria-labelledby="reservation-modal-title">
+    <div className="modal-backdrop" ref={backdropRef}>
+      <section ref={dialogRef} tabIndex={-1} className="modal wide-modal reservation-modal reservation-create-modal" role="dialog" aria-modal="true" aria-labelledby="reservation-modal-title">
         <div className="modal-header reservation-modal-hero">
           <span className="hero-icon"><BedDouble size={28} /></span>
           <button className="icon reservation-mobile-back" type="button" title="Volver" aria-label="Volver" onClick={props.onClose}><ChevronLeft size={24} /></button>
@@ -1541,7 +1593,7 @@ function ReservationModal(props: {
         <div className="reservation-modal-layout">
           <section className="reservation-form-card room-select-field">
             <h3><BedDouble size={18} />Seleccionar habitacion</h3>
-            <input aria-label="Buscar habitación" value={roomQuery} onChange={(event) => setRoomQuery(event.target.value)} placeholder="Buscar habitacion..." />
+            <input ref={initialFocusRef} aria-label="Buscar habitación" value={roomQuery} onChange={(event) => setRoomQuery(event.target.value)} placeholder="Buscar habitacion..." />
             <div className="room-picker">
               {filteredRooms.map((room) => (
                 <button
@@ -1642,7 +1694,7 @@ function ReservationModal(props: {
               <Paperclip size={20} />
               <strong>Adjuntar comprobante</strong>
               <span>Selecciona archivo, arrastra aqui o pega una imagen con Ctrl+V</span>
-              <input type="file" accept="image/*,application/pdf" multiple onChange={(event) => addPendingFiles(Array.from(event.target.files || []))} />
+              <input aria-label="Seleccionar comprobantes de la reserva" type="file" accept="image/*,application/pdf" multiple onChange={(event) => addPendingFiles(Array.from(event.target.files || []))} />
             </div>
             {pendingFiles.length > 0 && (
               <div className="pending-files">
@@ -1675,6 +1727,23 @@ function Field(props: { label: string; value: string; onChange: (value: string) 
     <label>{props.label}
       <input required={props.required} type={props.type || "text"} value={props.value} onChange={(event) => props.onChange(event.target.value)} />
     </label>
+  );
+}
+
+function IncrementalListControls(props: {
+  visibleCount: number;
+  totalCount: number;
+  step: number;
+  label: string;
+  onMore: () => void;
+}) {
+  if (props.totalCount <= props.visibleCount) return null;
+  const remaining = props.totalCount - props.visibleCount;
+  return (
+    <div className="incremental-list-controls" role="status" aria-live="polite">
+      <span>Mostrando {props.visibleCount} de {props.totalCount} {props.label}</span>
+      <button type="button" onClick={props.onMore}>Mostrar {Math.min(props.step, remaining)} más</button>
+    </div>
   );
 }
 
@@ -2134,7 +2203,7 @@ function MobileQuickAccessPanel(props: {
       </header>
       <section className="mobile-quick-detail-content">
         <div className={`mobile-quick-detail-heading ${props.type}`}><span>{config.icon}</span><div><h1 id="quick-access-title">{config.title}</h1><p>{config.subtitle}</p></div></div>
-        <label className="mobile-quick-search"><Search size={25} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar huésped o habitación" /></label>
+        <label className="mobile-quick-search"><Search size={25} /><input aria-label="Buscar huésped o habitación" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar huésped o habitación" /></label>
         <div className="mobile-quick-filters">
           {(["todos", "airbnb", "whatsapp"] as const).map((value) => <button key={value} className={channel === value ? "active" : ""} onClick={() => setChannel(value)}>{value === "todos" ? "Todos" : channelLabel(value)}</button>)}
         </div>
@@ -2476,7 +2545,7 @@ function CleaningView(props: { onNavigate: (view: View) => void; onMenuChange: (
             <div className="cleaning-section-title cleaning-room-section-title">
               <strong>Habitaciones</strong>
               <div className="cleaning-room-section-tools">
-                <div className="cleaning-search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar habitacion..." /></div>
+                <div className="cleaning-search"><Search size={16} /><input aria-label="Buscar habitación para limpieza" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar habitacion..." /></div>
                 <span>{filteredRooms.length} habitaciones</span>
               </div>
             </div>
@@ -2590,8 +2659,8 @@ function DesktopCleaningWorkspace(props: {
     <main className="desktop-cleaning-main">
       <header className="desktop-cleaning-header"><div><span>Control operativo</span><h1>Limpieza</h1><p>Selecciona una habitación para gestionar su limpieza</p></div><div><label><CalendarDays size={17} /><input type="date" value={props.date} onChange={(event) => props.setDate(event.target.value)} /></label><button className="primary" onClick={props.onRefresh}><RefreshCw size={17} />Actualizar</button></div></header>
       <section className="desktop-cleaning-metrics"><DesktopCleaningMetric icon={<Check size={25} />} label="Por limpiar" value={props.pendingCount} tone="red" /><DesktopCleaningMetric icon={<RotateCcw size={25} />} label="En limpieza" value={props.workingCount} tone="purple" /><DesktopCleaningMetric icon={<Upload size={25} />} label="Salen hoy" value={props.checkoutCount} tone="orange" /><DesktopCleaningMetric icon={<BadgeCheck size={25} />} label="Limpias" value={props.cleanCount} tone="green" /></section>
-      <section className="desktop-cleaning-content"><section className="desktop-cleaning-list"><header><h2>Todas las habitaciones</h2><span>Haz clic en una habitación para ver su detalle</span></header><div className="desktop-cleaning-list-tools"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar habitación o huésped" /></label><span><LayoutDashboard size={17} /></span></div><div className="desktop-cleaning-filter-tabs">{([['todas','Todas'],['por_limpiar','Por limpiar'],['salida_hoy','Salen hoy'],['segundo_dia','2° día'],['limpio','Limpias']] as [CleaningFilter,string][]).map(([value,label]) => <button key={value} className={props.filter === value ? "active" : ""} onClick={() => props.setFilter(value)}>{label}</button>)}</div><div className="desktop-cleaning-room-grid">{filterRooms.map((room) => { const operation = cleaningRoomOperation(room, props.operations); return <button key={room.habitacion_id} className={selected?.habitacion_id === room.habitacion_id ? "selected" : ""} onClick={() => { setSelectedId(room.habitacion_id); setNote(room.notas || ""); }}><strong>{room.codigo_habitacion}</strong><b>{operation?.huesped || room.nombre_habitacion || "Sin huésped"}</b><small>{operation?.salida ? `Check-out: ${operation.salida}` : formatCleaningState(room.estado)}</small><span>{channelLabel(operation?.canal || "whatsapp")}</span><i>{room.prioridad === "segundo_dia" ? "2° día" : room.estado === "limpio" ? "Limpia" : "Salida hoy"}</i></button>; })}</div></section>
-      <aside className="desktop-cleaning-detail"><header><h2>Detalle de limpieza</h2><span>● Información en tiempo real</span></header>{selected ? <><section className="desktop-detail-room"><strong>{selected.codigo_habitacion}</strong><div><b>Habitación {selected.codigo_habitacion}</b><span>{selectedOperation?.huesped || selected.nombre_habitacion}</span><small>{selectedOperation?.salida ? `Check-out: ${selectedOperation.salida}` : "Limpieza programada"}</small></div><i>{channelLabel(selectedOperation?.canal || "whatsapp")}</i></section><div className="desktop-detail-actions"><button className="primary" onClick={() => saveDetail("limpiando")}><Check size={17} />Iniciar limpieza</button><button onClick={() => saveDetail("limpio")}><Check size={17} />Marcar como limpia</button><button className="danger" onClick={() => setNote((value) => `${value}${value ? " " : ""}NOVEDAD: `)}><AlertCircle size={17} />Reportar novedad</button></div><section className="desktop-detail-checklist"><h3>Checklist rápido</h3><div>{checklist.map((item,index) => <button key={item} className={checks[index] ? "checked" : ""} onClick={() => setChecks((current) => current.map((value,itemIndex) => itemIndex === index ? !value : value))}><Check size={15} />{item}<i><Check size={14} /></i></button>)}</div></section><section className="desktop-detail-notes"><h3>Notas y evidencia</h3><textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="Escribe una observación sobre la limpieza..." /><label><ImagePlus size={24} />Arrastra fotos aquí<input type="file" accept="image/*" onChange={async (event) => { const file = event.target.files?.[0]; if (file) await api.uploadCleaningEvidence(selected.habitacion_id, props.date, note, file); }} /></label></section><footer><button onClick={() => saveDetail(selected.estado)}><Save size={17} />Guardar avance</button><button className="primary" onClick={() => saveDetail("limpio", true)}><Check size={17} />Finalizar limpieza</button></footer></> : <p className="empty-copy">Selecciona una habitación para ver su detalle.</p>}</aside></section>
+      <section className="desktop-cleaning-content"><section className="desktop-cleaning-list"><header><h2>Todas las habitaciones</h2><span>Haz clic en una habitación para ver su detalle</span></header><div className="desktop-cleaning-list-tools"><label><Search size={16} /><input aria-label="Buscar habitación o huésped para limpieza" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar habitación o huésped" /></label><span aria-hidden="true"><LayoutDashboard size={17} /></span></div><div className="desktop-cleaning-filter-tabs">{([['todas','Todas'],['por_limpiar','Por limpiar'],['salida_hoy','Salen hoy'],['segundo_dia','2° día'],['limpio','Limpias']] as [CleaningFilter,string][]).map(([value,label]) => <button key={value} className={props.filter === value ? "active" : ""} onClick={() => props.setFilter(value)}>{label}</button>)}</div><div className="desktop-cleaning-room-grid">{filterRooms.map((room) => { const operation = cleaningRoomOperation(room, props.operations); const status = room.estado === "limpio" ? "Limpia" : room.estado === "limpiando" ? "En limpieza" : room.prioridad === "segundo_dia" ? "2° día" : operation?.salida ? "Salida hoy" : "Por limpiar"; return <button key={room.habitacion_id} className={selected?.habitacion_id === room.habitacion_id ? "selected" : ""} onClick={() => { setSelectedId(room.habitacion_id); setNote(room.notas || ""); }}><strong>{room.codigo_habitacion}</strong><b>{operation?.huesped || room.nombre_habitacion || "Sin huésped"}</b><small>{operation?.salida ? `Check-out: ${operation.salida}` : formatCleaningState(room.estado)}</small>{operation?.canal ? <span>{channelLabel(operation.canal)}</span> : null}<i>{status}</i></button>; })}</div></section>
+      <aside className="desktop-cleaning-detail"><header><h2>Detalle de limpieza</h2><span>● Información en tiempo real</span></header>{selected ? <><section className="desktop-detail-room"><strong>{selected.codigo_habitacion}</strong><div><b>Habitación {selected.codigo_habitacion}</b><span>{selectedOperation?.huesped || selected.nombre_habitacion}</span><small>{selectedOperation?.salida ? `Check-out: ${selectedOperation.salida}` : "Limpieza programada"}</small></div>{selectedOperation?.canal ? <i>{channelLabel(selectedOperation.canal)}</i> : null}</section><div className="desktop-detail-actions"><button className="primary" disabled={selected.estado === "limpiando" || selected.estado === "limpio"} onClick={() => saveDetail("limpiando")}><Check size={17} />{selected.estado === "limpiando" ? "Limpieza iniciada" : selected.estado === "limpio" ? "Ya está limpia" : "Iniciar limpieza"}</button><button disabled={selected.estado === "limpio"} onClick={() => saveDetail("limpio")}><Check size={17} />{selected.estado === "limpio" ? "Habitación limpia" : "Marcar como limpia"}</button><button className="danger" onClick={() => setNote((value) => `${value}${value ? " " : ""}NOVEDAD: `)}><AlertCircle size={17} />Reportar novedad</button></div><section className="desktop-detail-checklist"><h3>Checklist rápido</h3><div>{checklist.map((item,index) => <button key={item} className={checks[index] ? "checked" : ""} aria-pressed={checks[index]} onClick={() => setChecks((current) => current.map((value,itemIndex) => itemIndex === index ? !value : value))}><Check size={15} />{item}<i><Check size={14} /></i></button>)}</div></section><section className="desktop-detail-notes"><h3>Notas y evidencia</h3><textarea aria-label="Notas de limpieza" value={note} onChange={(event) => setNote(event.target.value)} placeholder="Escribe una observación sobre la limpieza..." /><label><ImagePlus size={24} />Arrastra fotos aquí<input aria-label="Seleccionar evidencia de limpieza" type="file" accept="image/*" onChange={async (event) => { const file = event.target.files?.[0]; if (file) await api.uploadCleaningEvidence(selected.habitacion_id, props.date, note, file); }} /></label></section><footer><button onClick={() => saveDetail(selected.estado)}><Save size={17} />Guardar avance</button><button className="primary" disabled={selected.estado === "limpio"} onClick={() => saveDetail("limpio", true)}><Check size={17} />{selected.estado === "limpio" ? "Limpieza finalizada" : "Finalizar limpieza"}</button></footer></> : <p className="empty-copy">Selecciona una habitación para ver su detalle.</p>}</aside></section>
     </main>
   </section>;
 }
@@ -2656,8 +2725,8 @@ function MobileCleaningHomeReference(props: {
     <div className="mobile-cleaning-filters">{filters.map((item) => <button type="button" key={item.value} className={props.filter === item.value ? "active" : ""} onClick={() => props.setFilter(item.value)}>{item.label}</button>)}</div>
     <section className="mobile-cleaning-section mobile-all-rooms-section">
       <header><div><LayoutDashboard size={21} /><h2>Todas las habitaciones</h2></div><div className="mobile-cleaning-view-toggle"><button type="button" aria-label="Vista de cuadrícula" className="active"><LayoutDashboard size={17} /></button><button type="button" aria-label="Vista de lista"><Menu size={17} /></button></div></header>
-      <label className="mobile-cleaning-search"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar habitación o huésped" /></label>
-      <div className="mobile-cleaning-room-list">{visibleRooms.map((room) => { const operation = cleaningRoomOperation(room, operationRows); const status = secondDayIds.has(room.habitacion_id) ? "2° día" : room.estado === "limpio" ? "Limpia" : checkoutIds.has(room.habitacion_id) ? "Salida hoy" : "Por limpiar"; return <button type="button" className="mobile-cleaning-room-row" key={room.habitacion_id} onClick={() => setSelectedRoom({ room, operation })}><strong>{room.codigo_habitacion}</strong><span><b>{operation?.huesped || room.nombre_habitacion || "Habitación"}</b><small>{operation?.salida ? `Check-out: ${operation.salida}` : "Limpieza programada"}</small><em>{channelLabel(operation?.canal || "whatsapp")}</em></span><i className={status === "Limpia" ? "clean" : status === "2° día" ? "second" : "pending"}>{status}</i><ChevronRight size={19} /></button>; })}{visibleRooms.length === 0 && <p className="empty-copy">No hay habitaciones en este filtro.</p>}</div>
+      <label className="mobile-cleaning-search"><Search size={17} /><input aria-label="Buscar habitación o huésped para limpieza" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar habitación o huésped" /></label>
+      <div className="mobile-cleaning-room-list">{visibleRooms.map((room) => { const operation = cleaningRoomOperation(room, operationRows); const status = room.estado === "limpio" ? "Limpia" : room.estado === "limpiando" ? "En limpieza" : secondDayIds.has(room.habitacion_id) ? "2° día" : checkoutIds.has(room.habitacion_id) ? "Salida hoy" : "Por limpiar"; return <button type="button" className="mobile-cleaning-room-row" key={room.habitacion_id} onClick={() => setSelectedRoom({ room, operation })}><strong>{room.codigo_habitacion}</strong><span><b>{operation?.huesped || room.nombre_habitacion || "Habitación"}</b><small>{operation?.salida ? `Check-out: ${operation.salida}` : "Limpieza programada"}</small>{operation?.canal ? <em>{channelLabel(operation.canal)}</em> : null}</span><i className={status === "Limpia" ? "clean" : status === "En limpieza" ? "working" : status === "2° día" ? "second" : "pending"}>{status}</i><ChevronRight size={19} /></button>; })}{visibleRooms.length === 0 && <p className="empty-copy">No hay habitaciones en este filtro.</p>}</div>
     </section>
     {selectedRoom && <MobileCleaningDetailPanel room={selectedRoom.room} operation={selectedRoom.operation} date={props.date} onClose={() => setSelectedRoom(null)} onRefresh={props.onRefresh} />}
   </section>;
@@ -2709,11 +2778,11 @@ function MobileCleaningDetailPanel(props: { room: CleaningRoom; operation?: Oper
       <header><button className="icon" aria-label="Cerrar detalle de limpieza" onClick={props.onClose}><ChevronLeft size={27} /></button><div className="mobile-cleaning-detail-brand"><img src="/logos/vista-montana-instagram.png" alt="Vista Montaña" /><span>Vista Montaña<small>Apartasuites</small></span></div><strong id="cleaning-detail-title">Detalle de limpieza</strong></header>
       <section className="mobile-cleaning-detail-body">
         {error && <p className="cleaning-detail-error">{error}</p>}
-        <section className="cleaning-detail-summary"><strong>{props.room.codigo_habitacion}</strong><div><b>{props.operation?.huesped || props.room.nombre_habitacion || "Habitación"}</b><small>{props.operation?.salida ? `Check-out: ${props.operation.salida}` : "Limpieza programada"}</small><em>{props.room.prioridad === "segundo_dia" ? "2° día" : "Salida hoy"}</em></div></section>
-        <div className="cleaning-detail-actions"><button className="start" disabled={saving} onClick={() => persist("limpiando")}><Sparkles size={31} />Iniciar limpieza</button><button className="clean" disabled={saving} onClick={() => persist("limpio")}><CircleCheck size={34} />Marcar como limpia</button><button className={incident ? "incident active" : "incident"} type="button" onClick={() => setIncident((value) => !value)}><AlertCircle size={34} />Reportar novedad</button></div>
-        <section className="cleaning-detail-checklist"><h2>Checklist rápido</h2>{checklistLabels.map((label, index) => <button key={label} className={checks[index] ? "checked" : ""} onClick={() => setChecks((current) => current.map((value, itemIndex) => itemIndex === index ? !value : value))}><span>{checklistIcons[index]}</span>{label}<i><Check size={19} /></i></button>)}</section>
-        <section className="cleaning-detail-notes"><h2>Notas y evidencia</h2><label><textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder={incident ? "Describe la novedad..." : "Escribe una observación..."} /><span><ImagePlus size={19} /></span></label><div className="cleaning-evidence-grid">{evidence.map((item) => <img key={item.id} src={item.ruta_archivo} alt="Evidencia de limpieza" />)}<label className="cleaning-add-photo"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => addEvidence(event.target.files?.[0])} /><ImagePlus size={24} />Agregar foto</label></div></section>
-        <footer><button disabled={saving} onClick={() => persist(props.room.estado)}><Save size={18} />Guardar avance</button><button className="primary" disabled={saving} onClick={() => persist("limpio", true)}><Check size={18} />Finalizar limpieza</button></footer>
+        <section className="cleaning-detail-summary"><strong>{props.room.codigo_habitacion}</strong><div><b>{props.operation?.huesped || props.room.nombre_habitacion || "Habitación"}</b><small>{props.operation?.salida ? `Check-out: ${props.operation.salida}` : "Limpieza programada"}</small><em>{props.room.estado === "limpio" ? "Limpia" : props.room.estado === "limpiando" ? "En limpieza" : props.room.prioridad === "segundo_dia" ? "2° día" : props.operation?.salida ? "Salida hoy" : "Por limpiar"}</em></div></section>
+        <div className="cleaning-detail-actions"><button className="start" disabled={saving || props.room.estado === "limpiando" || props.room.estado === "limpio"} onClick={() => persist("limpiando")}><Sparkles size={31} />{props.room.estado === "limpiando" ? "Limpieza iniciada" : props.room.estado === "limpio" ? "Ya está limpia" : "Iniciar limpieza"}</button><button className="clean" disabled={saving || props.room.estado === "limpio"} onClick={() => persist("limpio")}><CircleCheck size={34} />{props.room.estado === "limpio" ? "Habitación limpia" : "Marcar como limpia"}</button><button className={incident ? "incident active" : "incident"} type="button" aria-pressed={incident} onClick={() => setIncident((value) => !value)}><AlertCircle size={34} />Reportar novedad</button></div>
+        <section className="cleaning-detail-checklist"><h2>Checklist rápido</h2>{checklistLabels.map((label, index) => <button key={label} className={checks[index] ? "checked" : ""} aria-pressed={checks[index]} onClick={() => setChecks((current) => current.map((value, itemIndex) => itemIndex === index ? !value : value))}><span>{checklistIcons[index]}</span>{label}<i><Check size={19} /></i></button>)}</section>
+        <section className="cleaning-detail-notes"><h2>Notas y evidencia</h2><label><textarea aria-label="Notas de limpieza" value={note} onChange={(event) => setNote(event.target.value)} placeholder={incident ? "Describe la novedad..." : "Escribe una observación..."} /><span aria-hidden="true"><ImagePlus size={19} /></span></label><div className="cleaning-evidence-grid">{evidence.map((item) => <img key={item.id} src={item.ruta_archivo} alt="Evidencia de limpieza" />)}<label className="cleaning-add-photo"><input aria-label="Agregar foto de evidencia" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => addEvidence(event.target.files?.[0])} /><ImagePlus size={24} />Agregar foto</label></div></section>
+        <footer><button disabled={saving} onClick={() => persist(props.room.estado)}><Save size={18} />Guardar avance</button><button className="primary" disabled={saving || props.room.estado === "limpio"} onClick={() => persist("limpio", true)}><Check size={18} />{props.room.estado === "limpio" ? "Limpieza finalizada" : "Finalizar limpieza"}</button></footer>
       </section>
     </aside>
   );
@@ -2968,7 +3037,7 @@ function DashboardView(props: { dashboard: Dashboard | null; onSelect: (reservat
           <div className="vm-dashboard-controls">
             <div className="vm-month-switcher">
               <button className="icon" title="Mes anterior" onClick={() => setDashboardMonth(shiftMonth(dashboardMonth, -1))}><ChevronLeft size={18} /></button>
-              <input type="month" value={dashboardMonth} onChange={(event) => setDashboardMonth(event.target.value)} />
+              <input aria-label="Mes del dashboard" type="month" value={dashboardMonth} onChange={(event) => setDashboardMonth(event.target.value)} />
               <button className="icon" title="Mes siguiente" onClick={() => setDashboardMonth(shiftMonth(dashboardMonth, 1))}><ChevronRight size={18} /></button>
             </div>
             <label>Desde<input type="date" value={range.start} onChange={(event) => setRange({ ...range, start: event.target.value })} /></label>
@@ -3035,7 +3104,7 @@ function DashboardView(props: { dashboard: Dashboard | null; onSelect: (reservat
         <section className="vm-card dashboard-guest-list">
           <div className="vm-card-title">
             <h2>Lista de huespedes</h2>
-            <div className="vm-guest-search"><Search size={15} /><input value={guestSearch} onChange={(event) => setGuestSearch(event.target.value)} placeholder="Buscar huesped, habitacion o reserva..." /></div>
+            <div className="vm-guest-search"><Search size={15} /><input aria-label="Buscar huésped, habitación o reserva" value={guestSearch} onChange={(event) => setGuestSearch(event.target.value)} placeholder="Buscar huesped, habitacion o reserva..." /></div>
           </div>
           {filteredGuests.length === 0 && <p className="empty-copy">Sin reservas relevantes para mostrar.</p>}
           {filteredGuests.length > 0 && (
@@ -3048,7 +3117,20 @@ function DashboardView(props: { dashboard: Dashboard | null; onSelect: (reservat
                 </thead>
                 <tbody>
                   {filteredGuests.map((reservation) => (
-                    <tr key={reservation.id} onClick={() => props.onSelect(reservation)}>
+                    <tr
+                      key={reservation.id}
+                      className="dashboard-guest-row"
+                      tabIndex={0}
+                      role="button"
+                      aria-label={`Abrir detalle de ${reservation.nombre_completo_huesped}`}
+                      onClick={() => props.onSelect(reservation)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          props.onSelect(reservation);
+                        }
+                      }}
+                    >
                       <td>{reservation.nombre_completo_huesped}</td>
                       <td>{roomLabel(reservation)}</td>
                       <td><span className={`vm-badge ${reservation.origen_reserva === "airbnb" ? "airbnb" : "whatsapp"}`}>{reservation.origen_reserva === "airbnb" ? "Airbnb" : "WhatsApp"}</span></td>
@@ -3160,6 +3242,7 @@ function BillingView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [visibleItemCount, setVisibleItemCount] = useState(25);
 
   const rate = Number(porcentaje || 0) > 1 ? Number(porcentaje || 0) / 100 : Number(porcentaje || 0);
   const enrichedItems = items.map((item, index) => ({
@@ -3213,6 +3296,7 @@ function BillingView() {
   };
 
   useEffect(() => {
+    setVisibleItemCount(25);
     load();
   }, [start, end]);
 
@@ -3301,9 +3385,9 @@ function BillingView() {
               </tr>
             </thead>
             <tbody>
-              {enrichedItems.map((item) => (
+              {enrichedItems.slice(0, visibleItemCount).map((item) => (
                 <tr key={item.id}>
-                  <td><input type="checkbox" checked={item.included} onChange={(event) => toggleItem(item.id, event.target.checked)} /></td>
+                  <td><input aria-label={`Incluir remisión ${item.remision}`} type="checkbox" checked={item.included} onChange={(event) => toggleItem(item.id, event.target.checked)} /></td>
                   <td>{item.remision}</td>
                   <td>{item.huesped}</td>
                   <td>{item.habitacion}</td>
@@ -3317,6 +3401,13 @@ function BillingView() {
             </tbody>
           </table>
         </div>
+        <IncrementalListControls
+          visibleCount={Math.min(visibleItemCount, enrichedItems.length)}
+          totalCount={enrichedItems.length}
+          step={25}
+          label="remisiones"
+          onMore={() => setVisibleItemCount((count) => count + 25)}
+        />
       </section>
     </section>
   );
@@ -3363,6 +3454,7 @@ function RoomsView(props: { rooms: Room[]; reservations: Reservation[]; onSaved:
   const [syncingAllIcal, setSyncingAllIcal] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [visibleRoomCount, setVisibleRoomCount] = useState(12);
   const occupiedRoomIds = useMemo(() => {
     const ids = new Set<number>();
     props.reservations
@@ -3388,6 +3480,8 @@ function RoomsView(props: { rooms: Room[]; reservations: Reservation[]; onSaved:
   }, [occupiedRoomIds, props.rooms, roomQuery, roomStatusFilter]);
   const airbnbActiveCount = props.rooms.filter((room) => Number(room.airbnb_ical_activo || 0) === 1).length;
   const lastAirbnbSyncAt = useMemo(() => getLatestAirbnbSyncAt(props.rooms), [props.rooms]);
+
+  useEffect(() => setVisibleRoomCount(12), [roomQuery, roomStatusFilter]);
 
   useEffect(() => {
     setIcalOpen(Boolean(editing?.airbnb_ical_url));
@@ -3546,7 +3640,7 @@ function RoomsView(props: { rooms: Room[]; reservations: Reservation[]; onSaved:
       <section className="rooms-filter-bar">
         <label className="search-box room-search">
           <Search size={17} />
-          <input value={roomQuery} onChange={(event) => setRoomQuery(event.target.value)} placeholder="Buscar habitacion por ID/codigo..." />
+          <input aria-label="Buscar habitación por ID o código" value={roomQuery} onChange={(event) => setRoomQuery(event.target.value)} placeholder="Buscar habitacion por ID/codigo..." />
         </label>
         <div className="room-filter-chips">
           {([
@@ -3632,9 +3726,9 @@ function RoomsView(props: { rooms: Room[]; reservations: Reservation[]; onSaved:
       <section className="room-table">
         <label className="search-box room-search">
           <Search size={17} />
-          <input value={roomQuery} onChange={(event) => setRoomQuery(event.target.value)} placeholder="Buscar habitacion por ID/codigo..." />
+          <input aria-label="Buscar habitación en el listado" value={roomQuery} onChange={(event) => setRoomQuery(event.target.value)} placeholder="Buscar habitacion por ID/codigo..." />
         </label>
-        {filteredRooms.map((room) => {
+        {filteredRooms.slice(0, visibleRoomCount).map((room) => {
           const future = props.reservations.filter((reservation) => reservation.rooms.some((item) => item.habitacion_id === room.id)).length;
           return (
             <div className={`room-card ${room.estado === "inactiva" ? "disabled-room" : ""}`} key={room.id}>
@@ -3653,6 +3747,13 @@ function RoomsView(props: { rooms: Room[]; reservations: Reservation[]; onSaved:
           );
         })}
         {filteredRooms.length === 0 && <p className="empty-copy">No hay habitaciones con ese codigo.</p>}
+        <IncrementalListControls
+          visibleCount={Math.min(visibleRoomCount, filteredRooms.length)}
+          totalCount={filteredRooms.length}
+          step={12}
+          label="habitaciones"
+          onMore={() => setVisibleRoomCount((count) => count + 12)}
+        />
       </section>
     </section>
   );
@@ -3669,6 +3770,7 @@ function AirbnbSyncView(props: { rooms: Room[]; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [visibleFeedCount, setVisibleFeedCount] = useState(8);
   const listingRooms = useMemo(() => props.rooms.filter((room) => String(room.airbnb_listing_id || "").trim()), [props.rooms]);
   const [detailsRoomId, setDetailsRoomId] = useState("");
   const [listingDetails, setListingDetails] = useState<AirbnbListingDetailsResponse | null>(null);
@@ -3884,7 +3986,7 @@ function AirbnbSyncView(props: { rooms: Room[]; onChanged: () => void }) {
         <h2>Enlaces configurados</h2>
         {feeds.length === 0 && <p className="empty-copy">No hay calendarios Airbnb conectados todavia.</p>}
         <div className="sync-feed-list">
-          {feeds.map((feed) => (
+          {feeds.slice(0, visibleFeedCount).map((feed) => (
             <div className="sync-feed-card" key={feed.id}>
               <div>
                 <strong>{feed.nombre}</strong>
@@ -3902,6 +4004,13 @@ function AirbnbSyncView(props: { rooms: Room[]; onChanged: () => void }) {
             </div>
           ))}
         </div>
+        <IncrementalListControls
+          visibleCount={Math.min(visibleFeedCount, feeds.length)}
+          totalCount={feeds.length}
+          step={8}
+          label="enlaces"
+          onMore={() => setVisibleFeedCount((count) => count + 8)}
+        />
       </section>
 
       <section className="work-panel">
@@ -3940,6 +4049,7 @@ function AirbnbReservationsView(props: { onChanged: () => void; onSelect: (reser
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [visibleReservationCount, setVisibleReservationCount] = useState(20);
 
   const loadReservations = async () => {
     setError("");
@@ -3975,6 +4085,8 @@ function AirbnbReservationsView(props: { onChanged: () => void; onSelect: (reser
     ].join(" ").toLowerCase();
     return text.includes(search.trim().toLowerCase());
   });
+
+  useEffect(() => setVisibleReservationCount(20), [search]);
 
   const airbnbReservationId = (reservation: Reservation) => {
     const remision = (reservation.numero_remision || "").trim();
@@ -4023,7 +4135,7 @@ function AirbnbReservationsView(props: { onChanged: () => void; onSelect: (reser
         </label>
         {filtered.length === 0 && <p className="empty-copy">No hay reservas Airbnb para mostrar.</p>}
         <div className="airbnb-name-list">
-          {filtered.map((reservation) => (
+          {filtered.slice(0, visibleReservationCount).map((reservation) => (
             <div className="airbnb-name-row" key={reservation.id}>
               <button className="reservation-card compact-card" onClick={() => props.onSelect(reservation)}>
                 <strong>{isAirbnbPlaceholderName(reservation.nombre_completo_huesped) ? "Huesped pendiente" : reservation.nombre_completo_huesped}</strong>
@@ -4032,6 +4144,7 @@ function AirbnbReservationsView(props: { onChanged: () => void; onSelect: (reser
                 <small>{reservation.nombre_completo_huesped} · {formatMoney(reservation.total_pago)} · saldo {formatMoney(reservation.saldo)}</small>
               </button>
               <input
+                aria-label={`Nombre real del huésped para ${airbnbReservationId(reservation)}`}
                 value={guestNames[reservation.id] || ""}
                 onChange={(event) => setGuestNames({ ...guestNames, [reservation.id]: event.target.value })}
                 placeholder="Nombre real del huesped"
@@ -4042,6 +4155,13 @@ function AirbnbReservationsView(props: { onChanged: () => void; onSelect: (reser
             </div>
           ))}
         </div>
+        <IncrementalListControls
+          visibleCount={Math.min(visibleReservationCount, filtered.length)}
+          totalCount={filtered.length}
+          step={20}
+          label="reservas"
+          onMore={() => setVisibleReservationCount((count) => count + 20)}
+        />
       </section>
     </section>
   );
@@ -4232,7 +4352,7 @@ function ImportView(props: { rooms: Room[]; onImported: () => void }) {
         <summary>Importar reservas</summary>
         <div className="upload-zone">
           <FileSpreadsheet size={36} />
-          <input type="file" accept=".xlsx,.xls,.csv" onChange={(event) => upload(event.target.files?.[0])} />
+          <input aria-label="Seleccionar archivo de reservas para importar" type="file" accept=".xlsx,.xls,.csv" onChange={(event) => upload(event.target.files?.[0])} />
         </div>
         {preview && (
           <section className="preview-card">
@@ -4283,7 +4403,7 @@ function ImportView(props: { rooms: Room[]; onImported: () => void }) {
         </div>
         <div className="upload-zone">
           <FileSpreadsheet size={36} />
-          <input type="file" accept=".xlsx,.xls,.csv" onChange={(event) => uploadRooms(event.target.files?.[0])} />
+          <input aria-label="Seleccionar archivo de habitaciones para importar" type="file" accept=".xlsx,.xls,.csv" onChange={(event) => uploadRooms(event.target.files?.[0])} />
         </div>
         <div className="template-download">
           <div>
@@ -4342,7 +4462,7 @@ function ImportView(props: { rooms: Room[]; onImported: () => void }) {
           </div>
           <label className="file-button">
             <Upload size={17} />Subir archivo Airbnb
-            <input type="file" accept=".csv,.xlsx,.xls" onChange={(event) => uploadAirbnb(event.target.files?.[0])} />
+            <input aria-label="Seleccionar archivo Airbnb para importar" type="file" accept=".csv,.xlsx,.xls" onChange={(event) => uploadAirbnb(event.target.files?.[0])} />
           </label>
         </div>
         {airbnbPreview && (

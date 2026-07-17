@@ -318,19 +318,44 @@ app.post("/api/reservations/:id/rooms", requireRole("admin", "recepcion"), async
   const roomId = Number(req.body.roomId || req.body.habitacion_id);
   const room = getRoomById(roomId);
   if (!room) return res.status(404).json({ error: "Habitacion no encontrada." });
-  validateAvailability([roomId], reservation.fecha_ingreso, reservation.fecha_salida, reservation.id, {
-    ignoreAirbnbBlocks: reservation.origen_reserva !== "airbnb"
+  const transaction = db.transaction(() => {
+    const alreadyAssigned = db.prepare("SELECT 1 FROM reservation_rooms WHERE reserva_id = ? AND habitacion_id = ?").get(reservation.id, room.id);
+    if (alreadyAssigned) {
+      const error = new Error("La habitacion ya esta asignada a esta reserva.");
+      error.status = 409;
+      throw error;
+    }
+    validateAvailability([roomId], reservation.fecha_ingreso, reservation.fecha_salida, reservation.id, {
+      ignoreAirbnbBlocks: reservation.origen_reserva !== "airbnb"
+    });
+    db.prepare(`
+      INSERT INTO reservation_rooms (reserva_id, habitacion_id, codigo_habitacion_original, precio_asignado, notas)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(reservation.id, room.id, room.codigo_habitacion, req.body.precio_asignado || reservation.valor_base, req.body.notas || "");
   });
-  db.prepare(`
-    INSERT INTO reservation_rooms (reserva_id, habitacion_id, codigo_habitacion_original, precio_asignado, notas)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(reservation.id, room.id, room.codigo_habitacion, req.body.precio_asignado || reservation.valor_base, req.body.notas || "");
+  transaction();
   res.status(201).json(getReservation(reservation.id));
 }));
 
 app.delete("/api/reservations/:id/rooms/:roomId", requireRole("admin", "recepcion"), (req, res) => {
-  db.prepare("DELETE FROM reservation_rooms WHERE reserva_id = ? AND habitacion_id = ?").run(Number(req.params.id), Number(req.params.roomId));
-  res.json(getReservation(Number(req.params.id)));
+  const reservationId = Number(req.params.id);
+  const roomId = Number(req.params.roomId);
+  const transaction = db.transaction(() => {
+    const count = db.prepare("SELECT COUNT(*) AS total FROM reservation_rooms WHERE reserva_id = ?").get(reservationId).total;
+    if (!count) {
+      const error = new Error("Reserva no encontrada.");
+      error.status = 404;
+      throw error;
+    }
+    if (count <= 1) {
+      const error = new Error("Una reserva debe conservar al menos una habitacion.");
+      error.status = 400;
+      throw error;
+    }
+    db.prepare("DELETE FROM reservation_rooms WHERE reserva_id = ? AND habitacion_id = ?").run(reservationId, roomId);
+  });
+  transaction();
+  res.json(getReservation(reservationId));
 });
 
 app.get("/api/reservations/:id/payments", (req, res) => {

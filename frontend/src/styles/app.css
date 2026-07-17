@@ -129,6 +129,22 @@ button.danger {
   display: none;
 }
 
+.incremental-list-controls {
+  grid-column: 1 / -1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 2px 2px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.incremental-list-controls button {
+  min-height: 44px;
+}
+
 button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
@@ -442,17 +458,10 @@ small {
   flex: 0 0 18px;
 }
 
-.room-list .calendar-bottom-spacer {
-  height: 33px;
-  min-height: 33px;
-  flex-basis: 33px;
-}
-
 .calendar-shell {
   height: calc(100vh - 188px);
   min-height: 420px;
-  display: grid;
-  grid-template-columns: 270px 1fr;
+  display: block;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: #ffffff;
@@ -460,26 +469,41 @@ small {
   max-width: 100%;
 }
 
+.calendar-unified-grid {
+  width: max-content;
+  min-width: 100%;
+  display: grid;
+  grid-template-columns: 270px max-content;
+  align-items: start;
+}
+
 .calendar-page {
   min-height: 0;
 }
 
 .room-column {
+  position: sticky;
+  left: 0;
+  z-index: 200;
+  align-self: start;
   border-right: 1px solid var(--border);
   background: var(--brand-cream-2);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+  overflow: visible;
 }
 
 .room-header {
+  position: sticky;
+  top: 0;
+  z-index: 210;
   height: 58px;
   padding: 18px 14px;
   font-weight: 700;
   border-bottom: 1px solid var(--border);
+  background: var(--brand-cream-2);
 }
 
 .room-cell {
+  position: relative;
   height: 66px;
   min-height: 66px;
   display: flex;
@@ -487,6 +511,57 @@ small {
   gap: 10px;
   padding: 0 12px;
   border-bottom: 1px solid var(--border);
+}
+
+.room-water-amenities {
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  display: flex;
+  gap: 4px;
+}
+
+.room-water-amenity {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid #b8d9e4;
+  border-radius: 50%;
+  color: #19708c;
+  background: #effbff;
+}
+
+.room-water-amenity img {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.room-water-amenity::after {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 50%;
+  z-index: 220;
+  padding: 4px 6px;
+  border-radius: 4px;
+  color: #ffffff;
+  background: #173c49;
+  content: attr(data-tooltip);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(-2px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.room-water-amenity:hover::after,
+.room-water-amenity:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 .room-cell.disabled-room,
@@ -506,10 +581,7 @@ small {
 }
 
 .room-list {
-  flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  scrollbar-width: thin;
 }
 
 .empty-room-list {
@@ -546,7 +618,10 @@ small {
 }
 
 .calendar-scroll {
+  width: 100%;
+  height: 100%;
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .date-grid {
@@ -609,6 +684,8 @@ small {
   position: relative;
   display: flex;
   border-bottom: 1px solid var(--border);
+  content-visibility: auto;
+  contain-intrinsic-block-size: 66px;
 }
 
 .calendar-row.disabled-room-row .day-slot {
@@ -672,34 +749,6 @@ small {
   overflow: visible;
   filter: brightness(0.98);
   box-shadow: 0 0 0 2px rgba(0, 137, 77, 0.2);
-}
-
-.reservation-bar[data-tooltip]::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  left: 0;
-  top: calc(100% + 7px);
-  z-index: 1;
-  width: max-content;
-  max-width: 260px;
-  padding: 7px 9px;
-  border-radius: 6px;
-  color: #ffffff;
-  background: #172b22;
-  box-shadow: 0 8px 18px rgba(11, 39, 26, 0.18);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.25;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-3px);
-  transition: opacity 120ms ease, transform 120ms ease;
-  white-space: normal;
-}
-
-.reservation-bar[data-tooltip]:hover::after {
-  opacity: 1;
-  transform: translateY(0);
 }
 
 .block-bar {
@@ -800,7 +849,7 @@ small {
 /* This rule must follow the normal active-reservation layer. Otherwise the
    later :not(.cancelled) selector lowers a hovered reservation below its tooltip. */
 .reservation-bar:hover {
-  z-index: 30;
+  z-index: 100;
 }
 
 .detail-panel,
@@ -4133,6 +4182,17 @@ th {
   background: #f8fbf6;
 }
 
+.dashboard-guest-list .dashboard-guest-row {
+  cursor: pointer;
+}
+
+.dashboard-guest-list .dashboard-guest-row:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 3px solid var(--brand-gold);
+  outline-offset: -3px;
+}
+
 .calendar-page,
 .rooms-page {
   min-width: 0;
@@ -6534,21 +6594,6 @@ th {
     min-height: 0;
   }
 
-  .app-shell.calendar-mode .room-list,
-  .app-shell.calendar-mode .calendar-scroll {
-    overscroll-behavior: contain;
-  }
-
-  .app-shell.calendar-mode .room-list {
-    overflow-y: hidden;
-    scrollbar-width: none;
-  }
-
-  .app-shell.calendar-mode .room-list::-webkit-scrollbar {
-    width: 0;
-    height: 0;
-  }
-
   .dashboard-hero,
   .toolbar,
   .metric-card,
@@ -6865,6 +6910,7 @@ th {
   .app-shell.cleaning-mode .mobile-cleaning-room-row > span em { width: max-content; padding: 3px 6px; border-radius: 999px; color: #00894c; background: #eaf7ee; font-size: 9px; font-style: normal; }
   .app-shell.cleaning-mode .mobile-cleaning-room-row > i { width: max-content; padding: 5px 7px; border-radius: 999px; color: #f14b36; background: #fff0e8; font-size: 9px; font-style: normal; white-space: nowrap; }
   .app-shell.cleaning-mode .mobile-cleaning-room-row > i.clean { color: #00894c; background: #eaf7ee; }
+  .app-shell.cleaning-mode .mobile-cleaning-room-row > i.working { color: #7047dc; background: #f0ebff; }
   .app-shell.cleaning-mode .mobile-cleaning-room-row > i.second { color: #7047dc; background: #f0ebff; }
 
   .app-shell.cleaning-mode .mobile-cleaning-detail > header { min-height: 124px; grid-template-rows: 48px auto; padding: 14px 14px 0; }
@@ -7280,7 +7326,10 @@ th {
   .calendar-stage-grid .calendar-shell {
     height: min(620px, 68vh);
     min-height: 430px;
-    grid-template-columns: minmax(132px, 38vw) minmax(0, 1fr);
+  }
+
+  .calendar-unified-grid {
+    grid-template-columns: minmax(132px, 38vw) max-content;
   }
 
   .calendar-side-panel,
@@ -7407,8 +7456,8 @@ th {
     grid-template-columns: 1fr;
   }
 
-  .calendar-stage-grid .calendar-shell {
-    grid-template-columns: 128px minmax(0, 1fr);
+  .calendar-unified-grid {
+    grid-template-columns: 128px max-content;
   }
 
   .room-header {
@@ -7545,6 +7594,34 @@ th {
 
   .desktop-layout {
     padding: 16px 26px calc(122px + env(safe-area-inset-bottom));
+  }
+
+  .desktop-layout,
+  .rooms-page,
+  .rooms-page > *,
+  .rooms-page .form-grid,
+  .rooms-page .room-table,
+  .rooms-page .room-card,
+  .rooms-page .room-card-main {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .rooms-page,
+  .rooms-page .room-editor-panel,
+  .rooms-page .room-table {
+    overflow-x: clip;
+  }
+
+  .rooms-page input,
+  .rooms-page select,
+  .rooms-page textarea {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  :where(.rooms-page, .airbnb-page, .billing-page, .cleaning-page, .mobile-bottom-navigation) :where(button, input, select, summary, .file-button) {
+    min-height: 44px;
   }
 
   .calendar-page { display: none; }
@@ -7690,7 +7767,7 @@ th {
   .room-kpi-card > span { width: 44px; height: 44px; }
   .rooms-filter-bar { padding: 0; border: 0; background: transparent; box-shadow: none; }
   .room-filter-chips { flex-wrap: nowrap; padding: 2px 0 7px; }
-  .room-filter-chips button { min-height: 43px; }
+  .room-filter-chips button { min-height: 44px; }
   .rooms-page .room-editor-panel { padding: 16px; border-radius: 21px; }
   .rooms-page .room-table { padding: 0; display: grid; gap: 14px; background: transparent; box-shadow: none; border: 0; }
   .rooms-page .room-card { min-height: 164px; grid-template-columns: minmax(0,1fr); gap: 10px; padding: 17px; border: 1px solid #edf0f4; border-top: 3px solid #15a55f; border-radius: 21px; background: rgba(255,255,255,.93); box-shadow: 0 11px 28px rgba(13,38,76,.06); }
@@ -7699,6 +7776,21 @@ th {
   .rooms-page .room-card strong { color: #071a3a; font-size: 18px; }
   .rooms-page .room-card button { grid-column: auto; justify-content: center; }
   .rooms-page .room-card .danger { display: none; }
+
+  .incremental-list-controls {
+    align-items: stretch;
+    flex-direction: column;
+    padding-top: 8px;
+  }
+
+  .incremental-list-controls button {
+    width: 100%;
+    border-radius: 14px;
+  }
+
+  .app-shell.cleaning-mode .mobile-cleaning-reference {
+    padding-bottom: calc(112px + env(safe-area-inset-bottom));
+  }
 
   .cleaning-board, .cleaning-page .work-panel, .import-page .work-panel, .airbnb-page .work-panel, .billing-page .work-panel { border-radius: 22px; }
   .cleaning-board-heading h2 { color: #071a3a; font-size: 32px; }
@@ -7920,6 +8012,51 @@ th {
   .reservation-create-modal .reservation-modal-layout { display: grid; grid-template-columns: 1fr; gap: 16px; }.reservation-create-modal .reservation-form-card { padding: 18px; border: 1px solid #e8edf2; border-radius: 23px; background: rgba(255,255,255,.94); box-shadow: 0 11px 24px rgba(16,32,61,.05); }.reservation-create-modal .reservation-form-card h3 { display: flex; align-items: center; gap: 13px; margin: 0 0 16px; color: #071a3a; font-size: 24px; }.reservation-create-modal .reservation-form-card h3 svg { width: 48px; height: 48px; padding: 13px; border-radius: 16px; color: #7d42e2; background: #f0e8ff; }.reservation-create-modal .reservation-form-card:nth-child(3) h3 svg { color: #00894c; background: #e5f6eb; }.reservation-create-modal .reservation-form-card:nth-child(4) h3 svg { color: #f07517; background: #fff0e3; }
   .reservation-create-modal .room-select-field { order: -1; }.reservation-create-modal .room-select-field h3 { font-size: 20px; }.reservation-create-modal .room-picker { max-height: 172px; overflow-y: auto; }.reservation-create-modal .form-grid.two { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }.reservation-create-modal .form-grid.two .full { grid-column: 1 / -1; }.reservation-create-modal label { min-width: 0; color: #65748f; font-size: 13px; }.reservation-create-modal input, .reservation-create-modal select { min-height: 52px; border-radius: 13px; color: #142b4e; background: #fff; font-size: 15px; }.reservation-create-modal textarea { border-radius: 13px; }.reservation-create-modal .check { min-height: 40px; }.reservation-create-modal .receipt-dropzone, .reservation-create-modal .pending-files, .reservation-create-modal .reservation-form-card:nth-last-child(2), .reservation-create-modal .reservation-form-card:last-child { display: none; }
   .reservation-create-modal .modal-actions { position: sticky; bottom: calc(-108px - env(safe-area-inset-bottom)); z-index: 4; display: grid; grid-template-columns: 1fr 1.15fr; gap: 11px; margin: 22px -18px -108px; padding: 14px 18px calc(14px + env(safe-area-inset-bottom)); border-top: 1px solid #e8edf2; background: rgba(255,255,255,.94); backdrop-filter: blur(14px); }.reservation-create-modal .modal-actions button { min-height: 58px; border-radius: 16px; }.reservation-create-modal .modal-actions button:first-child { display: none; }.reservation-create-modal .modal-actions .primary { grid-column: 2; grid-row: 1; background: linear-gradient(135deg,#008e50,#006b3d); }.reservation-create-modal .modal-actions button:nth-child(2) { grid-column: 1; grid-row: 1; font-size: 0; }.reservation-create-modal .modal-actions button:nth-child(2)::after { content: "Cancelar"; font-size: 18px; }
+}
+
+/* Pantallas móviles horizontales: conservar un solo desplazamiento útil del formulario. */
+@media (max-width: 820px) and (max-height: 480px) {
+  .modal-backdrop {
+    align-items: stretch;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .reservation-create-modal {
+    min-height: 100dvh;
+    max-height: 100dvh;
+    padding: 0 14px calc(70px + env(safe-area-inset-bottom));
+  }
+
+  .reservation-create-modal .reservation-modal-hero {
+    grid-template-columns: 40px minmax(0, 1fr) 40px;
+    min-height: 58px;
+    margin: 0 -14px 6px;
+    padding: 8px 14px 6px;
+  }
+
+  .reservation-create-modal .reservation-modal-hero::after,
+  .reservation-create-modal .reservation-modal-hero > div > span,
+  .reservation-create-modal .reservation-modal-summary {
+    display: none;
+  }
+
+  .reservation-create-modal .reservation-modal-hero strong { font-size: 19px; }
+  .reservation-create-modal .reservation-modal-hero .icon,
+  .reservation-create-modal .reservation-mobile-back { width: 38px; min-height: 38px; }
+  .reservation-create-modal .reservation-modal-layout { gap: 10px; }
+  .reservation-create-modal .reservation-form-card { padding: 12px; border-radius: 14px; }
+  .reservation-create-modal .reservation-form-card h3 { margin-bottom: 9px; font-size: 17px; }
+  .reservation-create-modal .reservation-form-card h3 svg { width: 32px; height: 32px; padding: 8px; border-radius: 10px; }
+  .reservation-create-modal .room-picker { max-height: 96px; }
+  .reservation-create-modal input,
+  .reservation-create-modal select { min-height: 42px; }
+  .reservation-create-modal .modal-actions {
+    bottom: calc(-70px - env(safe-area-inset-bottom));
+    margin: 12px -14px -70px;
+    padding: 7px 14px calc(7px + env(safe-area-inset-bottom));
+  }
+  .reservation-create-modal .modal-actions button { min-height: 48px; border-radius: 12px; }
 }
 
 @media (min-width: 821px) {
@@ -8285,5 +8422,63 @@ th {
 @media (min-width: 1500px) {
   .app-shell.calendar-mode .filter-row {
     flex-wrap: nowrap;
+  }
+}
+
+@media (max-width: 820px) {
+  button:not(.day-slot),
+  input:not([type="hidden"]),
+  select,
+  summary,
+  .file-button {
+    min-height: 44px !important;
+  }
+
+  .rooms-page .room-card strong,
+  .rooms-page .room-card small,
+  .rooms-page .room-card em {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+}
+
+/*
+ * El calendario conserva todas sus celdas montadas, pero limita el área de
+ * pintura en escritorio. Sin esta altura, las 66 filas expanden el documento
+ * a más de 4.000 px y cada desplazamiento horizontal repinta la grilla completa.
+ */
+@media (min-width: 821px) {
+  .app-shell.calendar-mode .calendar-stage-grid .calendar-shell {
+    height: clamp(520px, calc(100vh - 220px), 720px);
+    min-height: 520px;
+  }
+
+  .app-shell.calendar-mode .calendar-scroll {
+    overflow-x: auto;
+    overflow-y: scroll;
+    scrollbar-gutter: stable;
+    scrollbar-width: auto;
+    scrollbar-color: #789184 #eef3f0;
+  }
+
+  .app-shell.calendar-mode .calendar-scroll::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+
+  .app-shell.calendar-mode .calendar-scroll::-webkit-scrollbar-track {
+    background: #eef3f0;
+  }
+
+  .app-shell.calendar-mode .calendar-scroll::-webkit-scrollbar-thumb {
+    min-height: 44px;
+    border: 3px solid #eef3f0;
+    border-radius: 999px;
+    background: #789184;
+  }
+
+  .app-shell.calendar-mode .calendar-scroll::-webkit-scrollbar-thumb:hover {
+    background: #456555;
   }
 }

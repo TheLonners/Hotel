@@ -5,11 +5,24 @@ const { backup, DatabaseSync } = require("node:sqlite");
 const { db, databasePath, projectRoot } = require("../database/db");
 const { recordAudit } = require("./audit");
 
-const backupDir = process.env.BACKUP_DIR ? path.resolve(projectRoot, process.env.BACKUP_DIR) : path.join(projectRoot, "backups");
+const configuredBackupDir = process.env.BACKUP_DIR || process.env.DATABASE_BACKUP_DIR;
+const backupDir = configuredBackupDir ? path.resolve(projectRoot, configuredBackupDir) : path.join(projectRoot, "backups");
 let running = false;
 
 function stamp(now = new Date()) { return now.toISOString().replace(/[:.]/g, "-"); }
 function sha256(file) { return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"); }
+function recordDate(value) {
+  const date = new Date(`${String(value || "").replace(" ", "T")}Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+function isOlderThan(value, milliseconds) {
+  const date = recordDate(value);
+  return !date || Date.now() - date.getTime() > milliseconds;
+}
+function isInsideBackupDir(target) {
+  const relative = path.relative(path.resolve(backupDir), path.resolve(target));
+  return Boolean(relative) && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
 function counts() {
   const count = (table) => db.prepare(`SELECT COUNT(*) AS total FROM ${table}`).get().total;
   return { rooms: count("rooms"), reservations: count("reservations"), imports: count("import_batches"), auditEvents: count("audit_events") };
@@ -75,11 +88,37 @@ async function runDueBackups() {
   const today = new Date().toISOString().slice(0, 10);
   const month = today.slice(0, 7);
   const latestDaily = db.prepare("SELECT created_at FROM backup_records WHERE kind = 'daily' ORDER BY id DESC LIMIT 1").get();
+  const latestWeekly = db.prepare("SELECT created_at FROM backup_records WHERE kind = 'weekly' ORDER BY id DESC LIMIT 1").get();
   const latestMonthly = db.prepare("SELECT created_at FROM backup_records WHERE kind = 'monthly' ORDER BY id DESC LIMIT 1").get();
   const results = [];
   if (!latestDaily || !String(latestDaily.created_at).startsWith(today)) results.push(await createBackup({ kind: "daily" }));
+  if (!latestWeekly || isOlderThan(latestWeekly.created_at, 7 * 24 * 60 * 60 * 1000)) results.push(await createBackup({ kind: "weekly" }));
   if (!latestMonthly || !String(latestMonthly.created_at).startsWith(month)) results.push(await createBackup({ kind: "monthly" }));
+  if (String(process.env.BACKUP_PRUNE_ENABLED || "false").toLowerCase() === "true") results.push(...pruneBackups());
   return results;
 }
 
-module.exports = { backupDir, createBackup, listBackups, runDueBackups, validateBackup };
+function pruneBackups() {
+  const retention = {
+    daily: Math.max(1, Number(process.env.BACKUP_DAILY_RETENTION_DAYS || 14)) * 24 * 60 * 60 * 1000,
+    weekly: Math.max(1, Number(process.env.BACKUP_WEEKLY_RETENTION_WEEKS || 8)) * 7 * 24 * 60 * 60 * 1000,
+    monthly: Math.max(1, Number(process.env.BACKUP_MONTHLY_RETENTION_MONTHS || 12)) * 31 * 24 * 60 * 60 * 1000
+  };
+  const candidates = db.prepare(`
+    SELECT * FROM backup_records
+    WHERE status = 'valid' AND protected = 0 AND kind IN ('daily', 'weekly', 'monthly')
+    ORDER BY id ASC
+  `).all();
+  const pruned = [];
+  for (const record of candidates) {
+    if (!isOlderThan(record.created_at, retention[record.kind]) || !isInsideBackupDir(record.file_path)) continue;
+    if (!fs.existsSync(record.file_path)) continue;
+    fs.rmSync(record.file_path, { recursive: true, force: false });
+    db.prepare("UPDATE backup_records SET status = 'pruned' WHERE id = ?").run(record.id);
+    recordAudit({ action: "prune", entityType: "backup", entityId: record.id, details: { kind: record.kind, file: record.file_name } });
+    pruned.push({ file_name: record.file_name, status: "pruned" });
+  }
+  return pruned;
+}
+
+module.exports = { backupDir, createBackup, listBackups, pruneBackups, runDueBackups, validateBackup };

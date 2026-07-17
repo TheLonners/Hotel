@@ -543,6 +543,19 @@ function normalizeRoomAssignments(input) {
   });
 }
 
+function ensureUniqueRoomAssignments(assignments) {
+  const seen = new Set();
+  for (const assignment of assignments) {
+    const roomId = Number(assignment.habitacion_id);
+    if (seen.has(roomId)) {
+      const error = new Error("No puedes asignar la misma habitacion mas de una vez a la reserva.");
+      error.status = 400;
+      throw error;
+    }
+    seen.add(roomId);
+  }
+}
+
 function insertRoomAssignments(reservationId, assignments) {
   const insert = db.prepare(`
     INSERT INTO reservation_rooms (reserva_id, habitacion_id, codigo_habitacion_original, precio_asignado, notas)
@@ -627,6 +640,7 @@ function createReservation(input) {
     error.status = 400;
     throw error;
   }
+  ensureUniqueRoomAssignments(assignments);
 
   const payload = reservationPayload(input);
   if (!payload.nombre_completo_huesped) {
@@ -717,6 +731,7 @@ function updateReservation(id, input) {
     SELECT habitacion_id, codigo_habitacion_original, precio_asignado, notas
     FROM reservation_rooms WHERE reserva_id = ?
   `).all(id);
+  ensureUniqueRoomAssignments(assignments);
 
   const transaction = db.transaction(() => {
     if (!assignments.length) {

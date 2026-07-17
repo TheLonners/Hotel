@@ -11,7 +11,14 @@
     "dev:frontend": "pnpm --filter hotel-reservas-frontend dev",
     "typecheck": "pnpm --filter hotel-reservas-frontend typecheck",
     "seed": "pnpm --filter hotel-reservas-backend seed",
-    "backup": "pnpm --filter hotel-reservas-backend backup"
+    "backup": "pnpm --filter hotel-reservas-backend backup",
+    "db:check": "pnpm --filter hotel-reservas-backend db:check",
+    "db:backup": "pnpm --filter hotel-reservas-backend db:backup",
+    "db:restore": "pnpm --filter hotel-reservas-backend db:restore",
+    "db:test-restore": "pnpm --filter hotel-reservas-backend db:test-restore",
+    "db:maintenance": "pnpm --filter hotel-reservas-backend db:maintenance",
+    "db:concurrency": "pnpm --filter hotel-reservas-backend db:concurrency",
+    "db:migrate": "pnpm --filter hotel-reservas-backend db:migrate"
   },
   "engines": {
     "node": ">=24"

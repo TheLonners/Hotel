@@ -1,0 +1,44 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hotel-reservas:local
+    env_file:
+      - ./.env
+    environment:
+      NODE_ENV: production
+      TZ: ${TZ:-America/Bogota}
+    ports:
+      # Solo es accesible desde la LAN. No abras este puerto en el router.
+      - "3000:3000"
+    volumes:
+      # Los datos operativos nunca quedan dentro de la imagen ni del repositorio.
+      - ./runtime/data:/app/data
+      - ./runtime/uploads:/app/uploads
+      - ./runtime/backups:/app/backups
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["tunnel"]
+    depends_on:
+      app:
+        condition: service_healthy
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    restart: unless-stopped
+
+  cloudflared-quick:
+    image: cloudflare/cloudflared:latest
+    profiles: ["quick-tunnel"]
+    depends_on:
+      app:
+        condition: service_healthy
+    command: tunnel --no-autoupdate --url http://app:3000
+    restart: unless-stopped

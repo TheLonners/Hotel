@@ -25,6 +25,14 @@ try {
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM reservations").get().count, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM guests").get().count, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM reservation_guests WHERE reservation_id = ? AND is_primary_guest = 1").get(reservation.id).count, 1);
+  assert.throws(() => createReservation({
+    roomIds: [room.id, room.id], nombre_completo_huesped: "Asignacion duplicada", fecha_ingreso: "2030-01-20", fecha_salida: "2030-01-21",
+    cantidad_huespedes: 1, total_pago: 100, abono: 0
+  }), /misma habitacion/);
+  assert.throws(() => db.prepare(`
+    INSERT INTO reservation_rooms (reserva_id, habitacion_id, codigo_habitacion_original)
+    VALUES (?, ?, ?)
+  `).run(reservation.id, room.id, room.codigo_habitacion), /UNIQUE constraint failed/);
 
   const updatedReservation = updateReservation(reservation.id, {
     nombre_completo_huesped: "Huesped de prueba actualizado",

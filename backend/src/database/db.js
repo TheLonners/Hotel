@@ -11,8 +11,19 @@ const databasePath = process.env.DATABASE_PATH
 fs.mkdirSync(path.dirname(databasePath), { recursive: true });
 
 const db = new DatabaseSync(databasePath);
-db.exec("PRAGMA busy_timeout = 5000;");
-db.exec("PRAGMA journal_mode = WAL;");
+const busyTimeout = Math.max(0, Number(process.env.DATABASE_BUSY_TIMEOUT || 5000));
+const enableWal = String(process.env.DATABASE_ENABLE_WAL || "true").trim().toLowerCase() !== "false";
+const synchronous = ["OFF", "NORMAL", "FULL", "EXTRA"].includes(String(process.env.DATABASE_SYNCHRONOUS || "NORMAL").toUpperCase())
+  ? String(process.env.DATABASE_SYNCHRONOUS || "NORMAL").toUpperCase()
+  : "NORMAL";
+const walAutocheckpoint = Math.max(1, Number(process.env.DATABASE_WAL_AUTOCHECKPOINT || 1000));
+const journalSizeLimit = Math.max(0, Number(process.env.DATABASE_JOURNAL_SIZE_LIMIT || 67108864));
+
+db.exec(`PRAGMA busy_timeout = ${busyTimeout};`);
+if (enableWal) db.exec("PRAGMA journal_mode = WAL;");
+db.exec(`PRAGMA synchronous = ${synchronous};`);
+db.exec(`PRAGMA wal_autocheckpoint = ${walAutocheckpoint};`);
+db.exec(`PRAGMA journal_size_limit = ${journalSizeLimit};`);
 db.exec("PRAGMA foreign_keys = ON;");
 
 let transactionDepth = 0;
@@ -228,6 +239,11 @@ function syncRenamedAirbnbListingDirectory() {
 }
 
 function migrate() {
+  // Version 6 is fully materialized. Avoid DDL and historical backfills on
+  // every process start: they create needless writer contention in WAL mode.
+  const currentVersion = Number(db.prepare("PRAGMA user_version").get().user_version || 0);
+  if (currentVersion >= 6) return;
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS rooms (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -741,8 +757,26 @@ function migrate() {
   syncVerifiedAirbnbListingDirectory();
   syncRenamedAirbnbListingDirectory();
 
+  const duplicateAssignment = db.prepare(`
+    SELECT reserva_id, habitacion_id
+    FROM reservation_rooms
+    GROUP BY reserva_id, habitacion_id
+    HAVING COUNT(*) > 1
+    LIMIT 1
+  `).get();
+  if (duplicateAssignment) {
+    throw new Error("La migracion 6 requiere revisar asignaciones de habitacion duplicadas; no se modificaron datos.");
+  }
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_reservation_rooms_reservation_room
+      ON reservation_rooms(reserva_id, habitacion_id);
+    CREATE INDEX IF NOT EXISTS idx_reservation_rooms_reservation_room
+      ON reservation_rooms(reserva_id, habitacion_id);
+  `);
+
   db.exec("INSERT OR IGNORE INTO schema_migrations (version) VALUES (2)");
-  db.exec("PRAGMA user_version = 5");
+  db.exec("INSERT OR IGNORE INTO schema_migrations (version) VALUES (6)");
+  db.exec("PRAGMA user_version = 6");
 }
 
 migrate();
