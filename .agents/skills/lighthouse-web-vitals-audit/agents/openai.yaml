@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lighthouse and Web Vitals"
+  short_description: "Audit Lighthouse and Core Web Vitals"
+  default_prompt: "Use $lighthouse-web-vitals-audit to review mobile and desktop web vitals."

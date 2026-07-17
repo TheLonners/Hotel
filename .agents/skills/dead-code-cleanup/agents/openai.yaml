@@ -1,0 +1,4 @@
+interface:
+  display_name: "Dead code cleanup"
+  short_description: "Find and remove safe unused code"
+  default_prompt: "Use $dead-code-cleanup to identify and safely remove dead code."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Playwright end-to-end testing"
+  short_description: "Build stable critical-flow E2E tests"
+  default_prompt: "Use $e2e-testing-playwright to test critical hotel workflows with Playwright."

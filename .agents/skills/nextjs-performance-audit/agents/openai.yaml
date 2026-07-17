@@ -1,0 +1,4 @@
+interface:
+  display_name: "Next.js performance audit"
+  short_description: "Find safe Next.js performance improvements"
+  default_prompt: "Use $nextjs-performance-audit to audit and improve Next.js performance."

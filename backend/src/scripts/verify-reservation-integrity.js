@@ -7,7 +7,7 @@ const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "hotel-reservation-test-")
 process.env.DATABASE_PATH = path.join(tempDir, "hotel.sqlite");
 
 const { db } = require("../database/db");
-const { addPayment, createReservation, createRoom } = require("../services/reservations");
+const { addPayment, createReservation, createRoom, updateReservation } = require("../services/reservations");
 
 try {
   const room = createRoom({ codigo_habitacion: "TEST-01", nombre_habitacion: "Habitacion de prueba", capacidad: 2, estado: "disponible" });
@@ -25,6 +25,18 @@ try {
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM reservations").get().count, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM guests").get().count, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM reservation_guests WHERE reservation_id = ? AND is_primary_guest = 1").get(reservation.id).count, 1);
+
+  const updatedReservation = updateReservation(reservation.id, {
+    nombre_completo_huesped: "Huesped de prueba actualizado",
+    fecha_ingreso: "2030-01-10",
+    fecha_salida: "2030-01-12",
+    cantidad_huespedes: 1,
+    valor_base: 100000,
+    total_pago: 200000,
+    origen_reserva: "whatsapp"
+  });
+  assert.equal(updatedReservation.id, reservation.id);
+  assert.equal(updatedReservation.nombre_completo_huesped, "Huesped de prueba actualizado");
 
   const beforeRejectedRequests = db.prepare("SELECT COUNT(*) AS count FROM reservations").get().count;
   assert.throws(() => createReservation({

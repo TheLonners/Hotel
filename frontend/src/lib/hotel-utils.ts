@@ -1,6 +1,20 @@
 import type { Reservation, Room } from "../services/types";
 
-export const today = new Date().toISOString().slice(0, 10);
+function bogotaDateISO(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const year = values.year;
+  const month = values.month;
+  const day = values.day;
+  return `${year}-${month}-${day}`;
+}
+
+export const today = bogotaDateISO();
 export const currentMonth = today.slice(0, 7);
 
 export function formatMoney(value: number | string | undefined) {

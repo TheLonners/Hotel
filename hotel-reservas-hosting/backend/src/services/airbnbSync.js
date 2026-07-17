@@ -340,24 +340,6 @@ function eventReservationPayload(feed, event) {
   };
 }
 
-function findAirbnbReservationByReference(feed, payload) {
-  const reference = cleanText(payload?.numero_remision);
-  if (!reference) return null;
-
-  const reservation = db.prepare(`
-    SELECT r.id
-    FROM reservations r
-    JOIN reservation_rooms rr ON rr.reserva_id = r.id
-    WHERE rr.habitacion_id = @roomId
-      AND lower(coalesce(r.origen_reserva, '')) = 'airbnb'
-      AND lower(trim(coalesce(r.numero_remision, ''))) = lower(@reference)
-    ORDER BY r.id DESC
-    LIMIT 1
-  `).get({ roomId: feed.habitacion_id, reference });
-
-  return reservation ? getReservation(reservation.id) : null;
-}
-
 function upsertUnavailableBlock(feed, event, existingEvent) {
   const motivo = "Airbnb no disponible";
   const notas = [
@@ -481,11 +463,7 @@ async function syncAirbnbFeed(id) {
 
         const payload = eventReservationPayload(feed, event);
         let reservation;
-        // Airbnb can regenerate an iCal event UID for the same confirmation
-        // code. Prefer that stable code over a stale UID mapping so we update
-        // the existing reservation instead of treating it as an overlap.
-        const existingReservation = findAirbnbReservationByReference(feed, payload)
-          || (existingEvent?.reserva_id ? getReservation(existingEvent.reserva_id) : null);
+        const existingReservation = existingEvent?.reserva_id ? getReservation(existingEvent.reserva_id) : null;
         if (existingReservation) {
           reservation = updateReservation(existingReservation.id, preserveKnownGuestName(existingReservation, payload));
           updated += 1;
